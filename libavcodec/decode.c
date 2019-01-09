@@ -399,6 +399,7 @@ static int64_t guess_correct_pts(AVCodecContext *ctx,
  * returning any output, so this function needs to be called in a loop until it
  * returns EAGAIN.
  **/
+  #include "libavutil/time.h"
 static int decode_simple_internal(AVCodecContext *avctx, AVFrame *frame)
 {
     AVCodecInternal   *avci = avctx->internal;
@@ -430,7 +431,11 @@ static int decode_simple_internal(AVCodecContext *avctx, AVFrame *frame)
     if (HAVE_THREADS && avctx->active_thread_type & FF_THREAD_FRAME) {
         ret = ff_thread_decode_frame(avctx, frame, &got_frame, pkt);
     } else {
+        if (av_profiling_get())
+            avctx->last_tm = av_gettime();
         ret = avctx->codec->decode(avctx, frame, &got_frame, pkt);
+        if (av_profiling_get())
+            avctx->sum_working_time += av_gettime() - avctx->last_tm;
 
         if (!(avctx->codec->caps_internal & FF_CODEC_CAP_SETS_PKT_DTS))
             frame->pkt_dts = pkt->dts;

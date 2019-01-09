@@ -383,12 +383,16 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
     for (i = 0; i < src->nb_side_data; i++) {
+        int keep_ref = 0;
         const AVFrameSideData *sd_src = src->side_data[i];
         AVFrameSideData *sd_dst;
         if (   sd_src->type == AV_FRAME_DATA_PANSCAN
             && (src->width != dst->width || src->height != dst->height))
             continue;
-        if (force_copy) {
+        if (sd_src->type == AV_FRAME_DATA_INFERENCE_CLASSIFICATION ||
+            sd_src->type == AV_FRAME_DATA_INFERENCE_DETECTION)
+            keep_ref = 1;
+        if (force_copy && !keep_ref) {
             sd_dst = av_frame_new_side_data(dst, sd_src->type,
                                             sd_src->size);
             if (!sd_dst) {
@@ -836,6 +840,8 @@ const char *av_frame_side_data_name(enum AVFrameSideDataType type)
     case AV_FRAME_DATA_S12M_TIMECODE:               return "SMPTE 12-1 timecode";
     case AV_FRAME_DATA_SPHERICAL:                   return "Spherical Mapping";
     case AV_FRAME_DATA_ICC_PROFILE:                 return "ICC profile";
+    case AV_FRAME_DATA_INFERENCE_CLASSIFICATION:    return "Inference classification metadata";
+    case AV_FRAME_DATA_INFERENCE_DETECTION:         return "Inference detection metadata";
 #if FF_API_FRAME_QP
     case AV_FRAME_DATA_QP_TABLE_PROPERTIES:         return "QP table properties";
     case AV_FRAME_DATA_QP_TABLE_DATA:               return "QP table data";

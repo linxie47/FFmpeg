@@ -26,9 +26,11 @@
 #ifndef AVFILTER_DNN_INTERFACE_H
 #define AVFILTER_DNN_INTERFACE_H
 
+#include "dnn_data.h"
+
 typedef enum {DNN_SUCCESS, DNN_ERROR} DNNReturnType;
 
-typedef enum {DNN_NATIVE, DNN_TF} DNNBackendType;
+typedef enum {DNN_NATIVE, DNN_TF, DNN_INTEL_IE} DNNBackendType;
 
 typedef struct DNNData{
     float *data;
@@ -41,6 +43,22 @@ typedef struct DNNModel{
     // Sets model input and output, while allocating additional memory for intermediate calculations.
     // Should be called at least once before model execution.
     DNNReturnType (*set_input_output)(void *model, DNNData *input, DNNData *output);
+
+    // Get the result after the model execuation. Returns DNN_ERROR otherwise. the result is stored in the result->data. the backend is responsible to fill the other structure fields.
+    // The user should parse the result independently according to the output data structure format. the structure are defined by the user.
+    DNNReturnType (*get_execute_result)(void *model, DNNIOData *result);
+    // Set/feed the model with specified input data. Returns DNN_ERROR otherwise.
+    DNNReturnType (*set_input)(void *model, const DNNIOData *input);
+    // Get the input info of the model. Returns DNN_ERROR otherwise.
+    DNNReturnType (*get_input_info)(void *model, DNNModelInfo *info);
+    // Set the input info of the model. Returns DNN_ERROR otherwise.
+    DNNReturnType (*set_input_info)(void *model, DNNModelInfo *info);
+    // Get the output info of the model. Returns DNN_ERROR otherwise.
+    DNNReturnType (*get_output_info)(void *model, DNNModelInfo *info);
+    // Set the output info of the model. Returns DNN_ERROR otherwise.
+    DNNReturnType (*set_output_info)(void *model, DNNModelInfo *info);
+    // the model/NN will be created layer by layer according to the model backend type and model graph
+    DNNReturnType (*create_model)(void *model);
 } DNNModel;
 
 // Stores pointers to functions for loading, executing, freeing DNN models for one of the backends.
@@ -51,6 +69,9 @@ typedef struct DNNModule{
     DNNReturnType (*execute_model)(const DNNModel *model);
     // Frees memory allocated for model.
     void (*free_model)(DNNModel **model);
+
+    // Loads model and parameters from given configuration. Returns NULL if it is not possible.
+    DNNModel *(*load_model_with_config)(void *config);
 } DNNModule;
 
 // Initializes DNNModule depending on chosen backend.

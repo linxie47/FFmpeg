@@ -44,6 +44,7 @@
 #include "internal.h"
 
 #include "libavutil/ffversion.h"
+#include "libavutil/time.h"
 const char av_filter_ffversion[] = "FFmpeg version " FFMPEG_VERSION;
 
 void ff_tlog_ref(void *ctx, AVFrame *ref, int end)
@@ -760,6 +761,7 @@ static void free_link(AVFilterLink *link)
 void avfilter_free(AVFilterContext *filter)
 {
     int i;
+    int64_t frame_cnt = 0;
 
     if (!filter)
         return;
@@ -925,6 +927,7 @@ int avfilter_init_str(AVFilterContext *filter, const char *args)
 {
     AVDictionary *options = NULL;
     AVDictionaryEntry *e;
+    int64_t tm_init;
     int ret = 0;
 
     if (args && *args) {
@@ -1015,7 +1018,12 @@ int avfilter_init_str(AVFilterContext *filter, const char *args)
         }
     }
 
+    if (av_profiling_get())
+        tm_init = av_gettime();
     ret = avfilter_init_dict(filter, &options);
+    if (av_profiling_get())
+        filter->init_working_time = av_gettime() - tm_init;
+
     if (ret < 0)
         goto fail;
 
@@ -1422,12 +1430,19 @@ int ff_filter_activate(AVFilterContext *filter)
 {
     int ret;
 
+    if (av_profiling_get())
+        filter->last_tm = av_gettime();
+
     /* Generic timeline support is not yet implemented but should be easy */
     av_assert1(!(filter->filter->flags & AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC &&
                  filter->filter->activate));
     filter->ready = 0;
     ret = filter->filter->activate ? filter->filter->activate(filter) :
           ff_filter_activate_default(filter);
+
+    if (av_profiling_get())
+        filter->sum_working_time += av_gettime() - filter->last_tm;
+
     if (ret == FFERROR_NOT_READY)
         ret = 0;
     return ret;

@@ -400,6 +400,7 @@ isRGB:
   rgb8
   rgba64be
   rgba64le
+  rgbp
 
 Gray:
   gray
@@ -546,6 +547,7 @@ AnyRGB:
   rgb8
   rgba64be
   rgba64le
+  rgbp
 
 ALPHA:
   ayuv64be
@@ -689,6 +691,7 @@ Planar:
   p010le
   p016be
   p016le
+  rgbp
   yuv410p
   yuv411p
   yuv420p
@@ -829,6 +832,7 @@ PlanarRGB:
   gbrp9le
   gbrpf32be
   gbrpf32le
+  rgbp
 
 usePal:
   bgr4_byte

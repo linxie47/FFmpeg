@@ -28,6 +28,7 @@
 #include "avcodec.h"
 #include "frame_thread_encoder.h"
 #include "internal.h"
+#include "libavutil/time.h"
 
 int ff_alloc_packet2(AVCodecContext *avctx, AVPacket *avpkt, int64_t size, int64_t min_size)
 {
@@ -293,7 +294,12 @@ int attribute_align_arg avcodec_encode_video2(AVCodecContext *avctx,
 
     av_assert0(avctx->codec->encode2);
 
+    if (av_profiling_get())
+        avctx->last_tm = av_gettime();
     ret = avctx->codec->encode2(avctx, avpkt, frame, got_packet_ptr);
+    if (av_profiling_get())
+        avctx->sum_working_time += av_gettime() - avctx->last_tm;
+
     av_assert0(ret <= 0);
 
     emms_c();
