@@ -142,6 +142,8 @@ enum AVFrameSideDataType {
      */
     AV_FRAME_DATA_ICC_PROFILE,
 
+    AV_FRAME_DATA_INFERENCE_DETECTION,
+
 #if FF_API_FRAME_QP
     /**
      * Implementation-specific description of the format of AV_FRAME_QP_TABLE_DATA.
