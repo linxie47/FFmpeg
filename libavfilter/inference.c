@@ -29,6 +29,7 @@
 #include "libswscale/swscale.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/avassert.h"
+#include "libavutil/imgutils.h"
 
 #include "inference.h"
 
@@ -46,6 +47,8 @@ struct InferenceBaseContext
     DNNModelInfo output_info;
 
     VideoPP vpp;
+
+    InferencePreProcess preprocess;
 };
 
 static int fill_dnn_data_from_frame(DNNIOData *data,
@@ -97,12 +100,88 @@ static int fill_dnn_data_from_frame(DNNIOData *data,
     return 0;
 }
 
+static int sw_crop_and_scale(AVFrame *frame,
+                             float x0, float y0, float x1, float y1,
+                             int out_w, int out_h, uint8_t *data[], int stride[])
+{
+    int err, bufsize;
+    struct SwsContext *sws_ctx;
+    const AVPixFmtDescriptor *desc;
+    int x, y, w, h, hsub, vsub;
+    int max_step[4]; ///< max pixel step for each plane, expressed as a number of bytes
+    enum AVPixelFormat expect_format = AV_PIX_FMT_BGR24;
+
+    AVFrame *temp = av_frame_alloc();
+    if (!temp) {
+        err = AVERROR(ENOMEM);
+        return err;
+    }
+    av_frame_ref(temp, frame);
+
+    desc = av_pix_fmt_desc_get(temp->format);
+    hsub = desc->log2_chroma_w;
+    vsub = desc->log2_chroma_h;
+    av_image_fill_max_pixsteps(max_step, NULL, desc);
+
+    /* cropping */
+    {
+        x = lrintf(x0);
+        y = lrintf(y0);
+        w = lrintf(x1) - x;
+        h = lrintf(y1) - y;
+
+        temp->width  = w;
+        temp->height = h;
+
+        temp->data[0] += y * temp->linesize[0];
+        temp->data[0] += x * max_step[0];
+
+        for (int i = 1; i < 3; i ++) {
+            if (temp->data[i]) {
+                temp->data[i] += (y >> vsub) * temp->linesize[i];
+                temp->data[i] += (x * max_step[i]) >> hsub;
+            }
+        }
+
+        /* alpha plane */
+        if (temp->data[3]) {
+            temp->data[3] += y * temp->linesize[3];
+            temp->data[3] += x * max_step[3];
+        }
+    }
+
+    /* create scaling context */
+    sws_ctx = sws_getContext(temp->width, temp->height, temp->format,
+                             out_w, out_h, expect_format,
+                             SWS_BILINEAR, NULL, NULL, NULL);
+    if (!sws_ctx) {
+        av_log(NULL, AV_LOG_ERROR, "Create scaling context failed!\n");
+        err = AVERROR(EINVAL);
+        return err;
+    }
+
+    if (!data[0]) {
+        bufsize = av_image_alloc(data, stride, out_w, out_h, expect_format, 1);
+        if (bufsize < 0)
+            return AVERROR(ENOMEM);
+    }
+
+    sws_scale(sws_ctx, (const uint8_t * const*)temp->data,
+              temp->linesize, 0, temp->height, data, stride);
+
+    av_frame_free(&temp);
+    sws_freeContext(sws_ctx);
+
+    return 0;
+}
+
 int ff_inference_base_create(AVFilterContext *ctx,
                              InferenceBaseContext **base,
                              InferenceParam *param) {
     int i, ret;
     InferenceBaseContext *s;
     DNNModelInfo *info;
+    VideoPP *vpp;
 
     if (!param)
         return AVERROR(EINVAL);
@@ -162,9 +241,16 @@ int ff_inference_base_create(AVFilterContext *ctx,
     s->batch_size      = param->batch_size;
     s->every_nth_frame = param->every_nth_frame;
     s->threshold       = param->threshold;
+    s->preprocess      = param->preprocess;
 
     ret = s->model->create_model(s->model->model);
     DNN_ERR_CHECK(ctx);
+
+    vpp = &s->vpp;
+
+    // vpp init
+    vpp->swscale        = &sws_scale;
+    vpp->crop_and_scale = &sw_crop_and_scale;
 
     *base = s;
 #undef DNN_ERR_CHECK
@@ -199,23 +285,40 @@ int ff_inference_base_free(InferenceBaseContext **base)
     return 0;
 }
 
+int ff_inference_base_submit_frame(InferenceBaseContext *base,
+                                   AVFrame *frame,
+                                   int input_idx,
+                                   int batch_idx)
+{
+    DNNIOData input = { };
+    fill_dnn_data_from_frame(&input, frame, batch_idx, 1, input_idx);
+    base->model->set_input(base->model->model, &input);
+
+    return 0;
+}
+
+int ff_inference_base_infer(InferenceBaseContext *base)
+{
+    DNNReturnType dnn_ret;
+    dnn_ret = base->module->execute_model(base->model);
+    av_assert0(dnn_ret == DNN_SUCCESS);
+    return 0;
+}
+
 int ff_inference_base_filter_frame(InferenceBaseContext *base, AVFrame *in)
 {
-    VideoPP       *vpp = &base->vpp;
     DNNModelInfo *info = &base->input_info;
     DNNReturnType dnn_ret;
     DNNIOData input = { };
 
     for (int i = 0; i < info->numbers; i++) {
-        if (!vpp->scale_contexts[i]) {
-            fill_dnn_data_from_frame(&input, in, 0, 1, i);
-        } else {
-            AVFrame *tmp = vpp->frames[i];
-            sws_scale(vpp->scale_contexts[i], (const uint8_t * const*)in->data,
-                      in->linesize, 0, in->height, tmp->data, tmp->linesize);
-            fill_dnn_data_from_frame(&input, tmp, 0, 1, i);
+        AVFrame *processed_frame;
+        for (int j = 0; j < base->batch_size; j++) {
+            if (base->preprocess)
+                base->preprocess(base, i, in, &processed_frame);
+            fill_dnn_data_from_frame(&input, processed_frame, j, 1, i);
+            base->model->set_input(base->model->model, &input);
         }
-        base->model->set_input(base->model->model, &input);
     }
 
     dnn_ret = base->module->execute_model(base->model);
@@ -224,7 +327,9 @@ int ff_inference_base_filter_frame(InferenceBaseContext *base, AVFrame *in)
     return 0;
 }
 
-int ff_inference_base_get_infer_result(InferenceBaseContext *base, InferTensorMeta *metadata)
+int ff_inference_base_get_infer_result(InferenceBaseContext *base,
+                                       int output_index,
+                                       InferTensorMeta *metadata)
 {
     DNNModelInfo *info = &base->output_info;
     DNNIOData     data = { };
@@ -233,7 +338,7 @@ int ff_inference_base_get_infer_result(InferenceBaseContext *base, InferTensorMe
     av_assert0(metadata != NULL);
 
     // TODO: change to layer name for multiple outputs
-    data.in_out_idx = 0;
+    data.in_out_idx = output_index;
 
     ret = base->model->get_execute_result(base->model->model, &data);
     av_assert0(ret == DNN_SUCCESS);

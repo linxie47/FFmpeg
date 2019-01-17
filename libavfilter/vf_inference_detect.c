@@ -114,11 +114,11 @@ static int  face_end_frame_filter(AVFilterContext *ctx, InferTensorMeta *meta, A
     AVFrameSideData *sd;
     InferDetectionMeta *detect_meta = NULL;
 
-    BBoxesArray *boxes        = av_mallocz(sizeof(BBoxesArray));
+    BBoxesArray *boxes        = av_mallocz(sizeof(*boxes));
     if (!boxes)
         return AVERROR(ENOMEM);
 
-    detect_meta = av_malloc(sizeof(InferDetectionMeta));
+    detect_meta = av_malloc(sizeof(*detect_meta));
     if (!detect_meta)
         return AVERROR(ENOMEM);
 
@@ -130,7 +130,7 @@ static int  face_end_frame_filter(AVFilterContext *ctx, InferTensorMeta *meta, A
     av_assert0(meta->total_bytes >= max_proposal_count * object_size * sizeof(float));
 
     for (i = 0; i < max_proposal_count; i++) {
-        InferDetection *new_bbox = av_mallocz(sizeof(InferDetection));
+        InferDetection *new_bbox = av_mallocz(sizeof(*new_bbox));
 
         new_bbox->label_id   = (int)detection[i * object_size + 1];
         new_bbox->confidence = detection[i * object_size + 2];
@@ -188,6 +188,23 @@ typedef struct LogoDetectContext {
 static int  logo_init(AVFilterContext *ctx, const char *args) {return 0;}
 static void logo_uninit(AVFilterContext *ctx) {}
 static int  logo_end_frame_filter(AVFilterContext *ctx, InferTensorMeta *data, AVFrame *frame) { return 0; }
+
+static int detect_preprocess(InferenceBaseContext *base, int index, AVFrame *in, AVFrame **out)
+{
+    int ret;
+    VideoPP *vpp = ff_inference_base_get_vpp(base);
+    AVFrame *tmp = vpp->frames[index];
+
+    if (!vpp->scale_contexts[index]) {
+        *out = in;
+        return 0;
+    }
+
+    ret = vpp->swscale(vpp->scale_contexts[index], (const uint8_t * const*)in->data,
+                       in->linesize, 0, in->height, tmp->data, tmp->linesize);
+    *out = tmp;
+    return ret;
+}
 
 static int query_formats(AVFilterContext *context)
 {
@@ -331,6 +348,7 @@ static av_cold int detect_init(AVFilterContext *ctx)
     p.input_precision = DNN_DATA_PRECISION_U8;
     p.input_layout    = DNN_DATA_LAYOUT_NCHW;
     p.input_is_image  = 1;
+    p.preprocess      = &detect_preprocess;
 
     ret = ff_inference_base_create(ctx, &s->base, &p);
     if (ret < 0) {
@@ -369,7 +387,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     if (ret < 0)
         goto fail;
 
-    ret = ff_inference_base_get_infer_result(s->base, &tensor_meta);
+    ret = ff_inference_base_get_infer_result(s->base, 0, &tensor_meta);
     if (ret < 0)
         goto fail;
 
@@ -386,7 +404,7 @@ static const AVOption inference_detect_options[] = {
     { "model",       "path to model file for network",  OFFSET(model_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
     { "device",      "running on device type",          OFFSET(device_type),     AV_OPT_TYPE_FLAGS,  { .i64 = DNN_TARGET_DEVICE_CPU }, 0, 12, FLAGS },
     { "interval",    "detect every Nth frame",          OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 }, 0, 15, FLAGS},
-    { "batch_size",  "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 }, 0, 1024, FLAGS},
+    { "batch_size",  "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 }, 1, 1024, FLAGS},
     { "threshold",   "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5}, 0, 1, FLAGS},
 
     { "name",        "detection type name",             OFFSET(name),            AV_OPT_TYPE_STRING, .flags = FLAGS, "detection" },

@@ -24,6 +24,8 @@
 
 typedef struct InferenceBaseContext InferenceBaseContext;
 
+typedef int (*InferencePreProcess)(InferenceBaseContext *base, int index, AVFrame *in, AVFrame **out);
+
 typedef struct InferenceParam {
     char  *model_file;
     char  *labels_file;
@@ -40,6 +42,8 @@ typedef struct InferenceParam {
     int    input_layout;
     int    input_precision;
     int    input_is_image; //!< image or data
+
+    InferencePreProcess preprocess;
 } InferenceParam;
 
 #define MAX_VPP_NUM DNN_INPUT_OUTPUT_NUM
@@ -49,7 +53,18 @@ typedef enum { VPP_DEVICE_HW, VPP_DEVICE_SW } VPPDevice;
 typedef struct VideoPP {
     int      device;
     void    *scale_contexts[MAX_VPP_NUM];
-    AVFrame *frames[MAX_VPP_NUM];
+    AVFrame *frames[MAX_VPP_NUM];          //<! frames to save vpp output
+
+    int    (*swscale)(void *context,
+                      const uint8_t * const srcSlice[],
+                      const int srcStride[], int srcSliceY,
+                      int srcSliceH, uint8_t *const dst[],
+                      const int dstStride[]);
+    int    (*crop_and_scale)(AVFrame *frame,
+                             float crop_x0,  float crop_y0,
+                             float crop_x1,  float crop_y1,
+                             int   scale_w,  int   scale_h,
+                             uint8_t *dst[], int   dstStride[]);
 } VideoPP;
 
 #define MAX_TENSOR_DIM_NUM 8
@@ -93,16 +108,39 @@ typedef struct InferDetectionMeta {
     BBoxesArray *bboxes;
 } InferDetectionMeta;
 
+typedef struct InferClassification {
+    int     detect_id;        ///< detected bbox index
+    char   *name;             ///< class name, e.g. emotion, age
+    int     label_id;         ///< label index in labels
+    float   confidence;
+    float   value;
+    AVBufferRef *label_buf;   ///< label ref buf from label file
+} InferClassification;
+
+/* dynamic classifications array */
+typedef struct ClassifyArray {
+    InferClassification **classifications;
+    int                   num;
+} ClassifyArray;
+
+typedef struct InferClassificationMeta {
+    ClassifyArray *c_array;
+} InferClassificationMeta;
+
 int ff_inference_base_create(AVFilterContext *avctx, InferenceBaseContext **base, InferenceParam *p);
 
 int ff_inference_base_free(InferenceBaseContext **base);
 
+int ff_inference_base_submit_frame(InferenceBaseContext *base, AVFrame *frame, int input_idx, int batch_idx);
+
+int ff_inference_base_infer(InferenceBaseContext *base);
+
 int ff_inference_base_filter_frame(InferenceBaseContext *base, AVFrame *in);
 
-int ff_inference_base_get_infer_result(InferenceBaseContext *base, InferTensorMeta *metadata);
+int ff_inference_base_get_infer_result(InferenceBaseContext *base, int index, InferTensorMeta *metadata);
 
 DNNModelInfo* ff_inference_base_get_input_info(InferenceBaseContext *base);
 DNNModelInfo* ff_inference_base_get_output_info(InferenceBaseContext *base);
-VideoPP* ff_inference_base_get_vpp(InferenceBaseContext *base);
+VideoPP*      ff_inference_base_get_vpp(InferenceBaseContext *base);
 
 #endif

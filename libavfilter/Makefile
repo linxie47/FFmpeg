@@ -258,6 +258,7 @@ OBJS-$(CONFIG_HWUPLOAD_FILTER)               += vf_hwupload.o
 OBJS-$(CONFIG_HYSTERESIS_FILTER)             += vf_hysteresis.o framesync.o
 OBJS-$(CONFIG_IDET_FILTER)                   += vf_idet.o
 OBJS-$(CONFIG_IL_FILTER)                     += vf_il.o
+OBJS-$(CONFIG_INFERENCE_CLASSIFY_FILTER)     += vf_inference_classify.o
 OBJS-$(CONFIG_INFERENCE_DETECT_FILTER)       += vf_inference_detect.o
 OBJS-$(CONFIG_INFLATE_FILTER)                += vf_neighbor.o
 OBJS-$(CONFIG_INTERLACE_FILTER)              += vf_tinterlace.o
