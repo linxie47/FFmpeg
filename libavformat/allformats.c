@@ -133,6 +133,7 @@ extern AVInputFormat  ff_epaf_demuxer;
 extern AVOutputFormat ff_f4v_muxer;
 extern AVInputFormat  ff_ffmetadata_demuxer;
 extern AVOutputFormat ff_ffmetadata_muxer;
+extern AVOutputFormat ff_iemetadata_muxer;
 extern AVOutputFormat ff_fifo_muxer;
 extern AVOutputFormat ff_fifo_test_muxer;
 extern AVInputFormat  ff_filmstrip_demuxer;
