@@ -263,6 +263,7 @@ External library support:
   --enable-libsoxr         enable Include libsoxr resampling [no]
   --enable-libspeex        enable Speex de/encoding via libspeex [no]
   --enable-libsrt          enable Haivision SRT protocol via libsrt [no]
+  --enable-librdkafka      enable Kafka protocol via librdkafka [no]
   --enable-libssh          enable SFTP protocol via libssh [no]
   --enable-libtensorflow   enable TensorFlow as a DNN module backend
                            for DNN based filters like sr [no]
@@ -1764,6 +1765,7 @@ EXTERNAL_LIBRARY_LIST="
     openal
     opengl
     vapoursynth
+    librdkafka
 "
 
 HWACCEL_AUTODETECT_LIBRARY_LIST="
@@ -3349,6 +3351,7 @@ libsrt_protocol_deps="libsrt"
 libsrt_protocol_select="network"
 libssh_protocol_deps="libssh"
 libtls_conflict="openssl gnutls mbedtls"
+rdkafka_protocol_deps="librdkafka"
 
 # filters
 afftdn_filter_deps="avcodec"
@@ -6249,6 +6252,8 @@ enabled vapoursynth       && require_pkg_config vapoursynth "vapoursynth-script 
 
 enabled libinference_engine &&
     require_pkg_config libinference_engine dldt "ie_api_wrapper.h" IESizeOfContext
+
+enabled librdkafka  && require_pkg_config librdkafka rdkafka "librdkafka/rdkafka.h" rd_kafka_version
 
 if enabled gcrypt; then
     GCRYPT_CONFIG="${cross_prefix}libgcrypt-config"
