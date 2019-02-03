@@ -154,7 +154,6 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
         return 0;
     AVFrameSideData *sd;
     InferDetectionMeta *meta;
-    LabelsArray *labels;
     BBoxesArray *bboxes;
     AVFrameSideData *c_sd;
     InferClassificationMeta *cmeta;
@@ -167,7 +166,6 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
 
         if (meta) {
             bboxes = meta->bboxes;
-            labels = meta->labels;
             if (bboxes) {
                 if (bboxes->num > 0) {
                     jhead_write(s, frm_data);
@@ -198,7 +196,15 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
 
                     JSON_IVALUE(tmp_str, "object_id", bboxes->bbox[i]->object_id);
                     fill_line(s, tmp_str, md->current_escape_num, 0);
-                    JSON_STRING(tmp_str, "label", "");
+                    if (!bboxes->bbox[i]->label_buf) {
+                        JSON_STRING(tmp_str, "label", "face");
+                    } else {
+                        // object detection label index start from 1
+                        int label_id = bboxes->bbox[i]->label_id - 1;
+                        LabelsArray *array = (LabelsArray*)(bboxes->bbox[i]->label_buf->data);
+                        JSON_STRING(tmp_str, "label", array->label[label_id]);
+                    }
+
                     fill_line(s, tmp_str, md->current_escape_num, 0);
                     JSON_IVALUE(tmp_str, "label_id", bboxes->bbox[i]->label_id);
                     fill_line(s, tmp_str, md->current_escape_num, 0);

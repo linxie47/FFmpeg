@@ -20,6 +20,7 @@
 #define AVFILTER_INFERENCE_H
 
 #include "libavutil/common.h"
+#include "libswscale/swscale.h"
 #include "dnn_interface.h"
 
 typedef struct InferenceBaseContext InferenceBaseContext;
@@ -52,10 +53,11 @@ typedef enum { VPP_DEVICE_HW, VPP_DEVICE_SW } VPPDevice;
 
 typedef struct VideoPP {
     int      device;
+    int      expect_format;
     void    *scale_contexts[MAX_VPP_NUM];
     AVFrame *frames[MAX_VPP_NUM];          //<! frames to save vpp output
 
-    int    (*swscale)(void *context,
+    int    (*swscale)(struct SwsContext *context,
                       const uint8_t * const srcSlice[],
                       const int srcStride[], int srcSliceY,
                       int srcSliceH, uint8_t *const dst[],
@@ -64,6 +66,7 @@ typedef struct VideoPP {
                              float crop_x0,  float crop_y0,
                              float crop_x1,  float crop_y1,
                              int   scale_w,  int   scale_h,
+                             enum AVPixelFormat scale_format,
                              uint8_t *dst[], int   dstStride[]);
 } VideoPP;
 
@@ -77,18 +80,18 @@ typedef struct InferTensorMeta {
     char   *model_name;
     void   *data;
     size_t  total_bytes;
-    AVBufferRef *labels;
+    // AVBufferRef *labels;
 } InferTensorMeta;
 
 typedef struct InferDetection {
-    float x_min;
-    float y_min;
-    float x_max;
-    float y_max;
-    float confidence;
-    int   label_id;
-    int   object_id;
-    AVBufferRef *text;
+    float   x_min;
+    float   y_min;
+    float   x_max;
+    float   y_max;
+    float   confidence;
+    int     label_id;
+    int     object_id;
+    AVBufferRef *label_buf;
 } InferDetection;
 
 /* dynamic bounding boxes array */
@@ -104,7 +107,6 @@ typedef struct LabelsArray {
 } LabelsArray;
 
 typedef struct InferDetectionMeta {
-    LabelsArray *labels;
     BBoxesArray *bboxes;
 } InferDetectionMeta;
 
@@ -126,6 +128,15 @@ typedef struct ClassifyArray {
 typedef struct InferClassificationMeta {
     ClassifyArray *c_array;
 } InferClassificationMeta;
+
+/* split strings by delimiter */
+void av_split(char *str, const char *delim, char **array, int *num, int max);
+
+/* 2-dimensional norm */
+double av_norm(float vec[], size_t num);
+
+/* Dot Product */
+double av_dot(float vec1[], float vec2[], size_t num);
 
 int ff_inference_base_create(AVFilterContext *avctx, InferenceBaseContext **base, InferenceParam *p);
 

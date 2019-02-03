@@ -50,6 +50,7 @@ typedef struct InferenceDetectContext {
     InferenceBaseContext *base;
 
     char  *model_file;
+    char  *label_file;
     int    backend_type;
     int    device_type;
 
@@ -63,47 +64,40 @@ typedef struct InferenceDetectContext {
 
     char  *name;
     char  *params;
-    int  (*init)  (AVFilterContext *ctx, const char *args);
-    void (*uninit)(AVFilterContext *ctx);
-    int  (*end_frame_filter)(AVFilterContext *ctx, InferTensorMeta *data, AVFrame *frame);
-    void  *priv;
+
+    AVBufferRef *label_buf;
 } InferenceDetectContext;
+
+static void infer_labels_buffer_free(void *opaque, uint8_t *data)
+{
+    int i;
+    LabelsArray *labels = (LabelsArray *)data;
+
+    for (i = 0; i < labels->num; i++)
+        av_freep(&labels->label[i]);
+
+    av_free(data);
+}
 
 static void infer_detect_metadata_buffer_free(void *opaque, uint8_t *data)
 {
-    int i;
-    InferDetectionMeta *meta = (InferDetectionMeta *)data;
-    LabelsArray *labels = meta->labels;
-    BBoxesArray *bboxes = meta->bboxes;
+    BBoxesArray *bboxes = ((InferDetectionMeta *)data)->bboxes;
 
     if (bboxes) {
+        int i;
         for (i = 0; i < bboxes->num; i++) {
             InferDetection *p = bboxes->bbox[i];
+            if (p->label_buf)
+                av_buffer_unref(&p->label_buf);
             av_freep(&p);
         }
         av_freep(&bboxes);
     }
 
-    if (labels) {
-        for (i = 0; i < labels->num; i++) {
-            char *l = labels->label[i];
-            av_freep(&l);
-        }
-        av_freep(&labels);
-    }
-
     av_free(data);
 }
 
-typedef struct FaceDetectContext {
-    int max_num;
-
-} FaceDetectContext;
-
-static int  face_init(AVFilterContext *ctx, const char *args) {return 0;}
-static void face_uninit(AVFilterContext *ctx) {}
-
-static int  face_end_frame_filter(AVFilterContext *ctx, InferTensorMeta *meta, AVFrame *frame)
+static int detect_postprocess(AVFilterContext *ctx, InferTensorMeta *meta, AVFrame *frame)
 {
     int i;
     InferenceDetectContext *s = ctx->priv;
@@ -144,14 +138,18 @@ static int  face_end_frame_filter(AVFilterContext *ctx, InferTensorMeta *meta, A
             break;
         }
 
+        if (s->label_buf)
+            new_bbox->label_buf = av_buffer_ref(s->label_buf);
+
         av_dynarray_add(&boxes->bbox, &boxes->num, new_bbox);
     }
 
     // dump face detected meta
     for (i = 0; i < boxes->num; i++) {
         InferDetection *p = boxes->bbox[i];
-        av_log(ctx, AV_LOG_DEBUG, "DETECT META - label:%d confi:%f coord:%f %f %f %f\n",
-               p->label_id, p->confidence, p->x_min, p->y_min, p->x_max, p->y_max);
+        av_log(ctx, AV_LOG_DEBUG,
+               "DETECT META - label:%d confi:%f coord:%f %f %f %f\n",
+               p->label_id, p->confidence,p->x_min, p->y_min, p->x_max, p->y_max);
     }
 
     ref = av_buffer_create((uint8_t *)detect_meta, sizeof(*detect_meta),
@@ -160,34 +158,17 @@ static int  face_end_frame_filter(AVFilterContext *ctx, InferTensorMeta *meta, A
         return AVERROR(ENOMEM);
 
     detect_meta->bboxes = boxes;
-    detect_meta->labels = NULL;
 
     // add meta data to side data
     sd = av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_INFERENCE_DETECTION, ref);
     if (!sd) {
         av_buffer_unref(&ref);
-        av_log(NULL, AV_LOG_ERROR, "could not add new side data\n");
+        av_log(NULL, AV_LOG_ERROR, "Could not add new side data\n");
         return AVERROR(ENOMEM);
     }
 
     return 0;
 }
-
-typedef struct EmotionDetectContext {
-    int max_num;
-
-} EmotionDetectContext;
-static int  emotion_init(AVFilterContext *ctx, const char *args) {return 0;}
-static void emotion_uninit(AVFilterContext *ctx) {}
-static int  emotion_end_frame_filter(AVFilterContext *ctx, InferTensorMeta *data, AVFrame *frame) { return 0; }
-
-typedef struct LogoDetectContext {
-    int max_num;
-
-} LogoDetectContext;
-static int  logo_init(AVFilterContext *ctx, const char *args) {return 0;}
-static void logo_uninit(AVFilterContext *ctx) {}
-static int  logo_end_frame_filter(AVFilterContext *ctx, InferTensorMeta *data, AVFrame *frame) { return 0; }
 
 static int detect_preprocess(InferenceBaseContext *base, int index, AVFrame *in, AVFrame **out)
 {
@@ -217,7 +198,7 @@ static int query_formats(AVFilterContext *context)
 
     formats_list = ff_make_format_list(pixel_formats);
     if (!formats_list) {
-        av_log(context, AV_LOG_ERROR, "could not create formats list\n");
+        av_log(context, AV_LOG_ERROR, "Could not create formats list\n");
         return AVERROR(ENOMEM);
     }
 
@@ -236,7 +217,7 @@ static int config_input(AVFilterLink *inlink)
     VideoPP *vpp                     = ff_inference_base_get_vpp(s->base);
 
     for (i = 0; i < info->numbers; i++) {
-        av_log(ctx, AV_LOG_DEBUG, "input info [%d] %d - %d %d %d - %d %d %d\n",
+        av_log(ctx, AV_LOG_DEBUG, "Input info [%d] %d - %d %d %d - %d %d %d\n",
                i, info->batch_size, info->width[i], info->height[i], info->channels[i],
                info->is_image[i], info->precision[i], info->layout[i]);
     }
@@ -290,7 +271,7 @@ static int config_output(AVFilterLink *outlink)
     DNNModelInfo *info = ff_inference_base_get_output_info(s->base);
 
     for (int i = 0; i < info->numbers; i++) {
-        av_log(ctx, AV_LOG_DEBUG, "output info [%d] %d - %d %d %d - %d %d %d\n",
+        av_log(ctx, AV_LOG_DEBUG, "Output info [%d] %d - %d %d %d - %d %d %d\n",
             i, info->batch_size,
             info->width[i], info->height[i], info->channels[i],
             info->is_image[i], info->precision[i], info->layout[i]);
@@ -301,43 +282,48 @@ static int config_output(AVFilterLink *outlink)
     return 0;
 }
 
-typedef struct DetectFilterEntry {
-    const char *name;
-    size_t priv_size;
-    int  (*init)(AVFilterContext *ctx, const char *args);
-    void (*uninit)(AVFilterContext *ctx);
-    int  (*end_frame_filter)(AVFilterContext *ctx, InferTensorMeta *data, AVFrame *frame);
-} DetectFilterEntry;
-
-static const DetectFilterEntry detect_filter_entries[] = {
-    { "face",    sizeof(FaceDetectContext),    face_init,    face_uninit,    face_end_frame_filter },
-    { "emotion", sizeof(EmotionDetectContext), emotion_init, emotion_uninit, emotion_end_frame_filter  },
-    { "logo",    sizeof(LogoDetectContext),    logo_init,    logo_uninit,    logo_end_frame_filter },
-};
-
 static av_cold int detect_init(AVFilterContext *ctx)
 {
-    int i, ret;
+    int ret;
     InferenceDetectContext *s = ctx->priv;
     InferenceParam p = {};
 
     av_assert0(s->model_file && s->name);
 
-    for (i = 0; i < FF_ARRAY_ELEMS(detect_filter_entries); i++) {
-        const DetectFilterEntry *entry = &detect_filter_entries[i];
-        if (!strcmp(s->name, entry->name)) {
-            s->init             = entry->init;
-            s->uninit           = entry->uninit;
-            s->end_frame_filter = entry->end_frame_filter;
-
-            if (!(s->priv = av_mallocz(entry->priv_size)))
-                return AVERROR(ENOMEM);
-        }
-    }
-
-    av_assert0(s->init);
-
     av_assert0(s->backend_type == DNN_INTEL_IE);
+
+    if (s->label_file) {
+        int n, labels_num;
+        AVBufferRef *ref    = NULL;
+        LabelsArray *larray = NULL;
+        char buffer[4096]   = { };
+        char *_labels[100]  = { };
+
+        FILE *fp = fopen(s->label_file, "rb");
+        if (!fp) {
+            av_log(ctx, AV_LOG_ERROR, "Could not open file:%s\n", s->label_file);
+            return AVERROR(EIO);
+        }
+
+        n = fread(buffer, sizeof(buffer), 1, fp);
+        fclose(fp);
+
+        buffer[strcspn(buffer, "\n")] = 0;
+        av_split(buffer, ",", _labels, &labels_num, 100);
+
+        larray = av_mallocz(sizeof(*larray));
+        if (!larray)
+            return AVERROR(ENOMEM);
+
+        for (n = 0; n < labels_num; n++) {
+            char *l = av_strdup(_labels[n]);
+            av_dynarray_add(&larray->label, &larray->num, l);
+        }
+
+        ref = av_buffer_create((uint8_t *)larray, sizeof(*larray),
+                               &infer_labels_buffer_free, NULL, 0);
+        s->label_buf = ref;
+    }
 
     p.model_file      = s->model_file;
     p.backend_type    = s->backend_type;
@@ -352,14 +338,7 @@ static av_cold int detect_init(AVFilterContext *ctx)
 
     ret = ff_inference_base_create(ctx, &s->base, &p);
     if (ret < 0) {
-        av_log(ctx, AV_LOG_ERROR, "could not create inference\n");
-        return ret;
-    }
-
-    ret = s->init(ctx, s->params);
-    if (ret < 0) {
-        ff_inference_base_free(&s->base);
-        av_log(ctx, AV_LOG_ERROR, "init '%s' failed\n", s->name);
+        av_log(ctx, AV_LOG_ERROR, "Could not create inference\n");
         return ret;
     }
 
@@ -372,7 +351,7 @@ static av_cold void detect_uninit(AVFilterContext *ctx)
 
     ff_inference_base_free(&s->base);
 
-    av_freep(&s->priv);
+    if (s->label_buf) av_buffer_unref(&s->label_buf);
 }
 
 static int filter_frame(AVFilterLink *inlink, AVFrame *in)
@@ -391,7 +370,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     if (ret < 0)
         goto fail;
 
-    s->end_frame_filter(ctx, &tensor_meta, in);
+    detect_postprocess(ctx, &tensor_meta, in);
 
     return ff_filter_frame(outlink, in);
 fail:
@@ -403,6 +382,7 @@ static const AVOption inference_detect_options[] = {
     { "dnn_backend", "DNN backend for model execution", OFFSET(backend_type),    AV_OPT_TYPE_FLAGS,  { .i64 = DNN_INTEL_IE },          0, 2,  FLAGS, "engine" },
     { "model",       "path to model file for network",  OFFSET(model_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
     { "device",      "running on device type",          OFFSET(device_type),     AV_OPT_TYPE_FLAGS,  { .i64 = DNN_TARGET_DEVICE_CPU }, 0, 12, FLAGS },
+    { "label",       "label file path for detection",   OFFSET(label_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
     { "interval",    "detect every Nth frame",          OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 }, 0, 15, FLAGS},
     { "batch_size",  "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 }, 1, 1024, FLAGS},
     { "threshold",   "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5}, 0, 1, FLAGS},

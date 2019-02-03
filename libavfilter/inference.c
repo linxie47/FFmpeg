@@ -101,15 +101,18 @@ static int fill_dnn_data_from_frame(DNNIOData *data,
 }
 
 static int sw_crop_and_scale(AVFrame *frame,
-                             float x0, float y0, float x1, float y1,
-                             int out_w, int out_h, uint8_t *data[], int stride[])
+                             float x0, float y0,
+                             float x1, float y1,
+                             int out_w, int out_h,
+                             enum AVPixelFormat out_format,
+                             uint8_t *data[], int stride[])
 {
     int err, bufsize;
     struct SwsContext *sws_ctx;
     const AVPixFmtDescriptor *desc;
     int x, y, w, h, hsub, vsub;
     int max_step[4]; ///< max pixel step for each plane, expressed as a number of bytes
-    enum AVPixelFormat expect_format = AV_PIX_FMT_BGR24;
+    enum AVPixelFormat expect_format = out_format;
 
     AVFrame *temp = av_frame_alloc();
     if (!temp) {
@@ -175,13 +178,56 @@ static int sw_crop_and_scale(AVFrame *frame,
     return 0;
 }
 
+void av_split(char *str, const char *delim, char **array, int *num, int max)
+{
+    char *p;
+    int i = 0;
+
+    if (!str || !delim || !array || !num)
+        return;
+
+    p = strtok(str, delim);
+    while (p != NULL) {
+        array[i++] = p;
+
+        av_assert0 (i < max);
+
+        p = strtok(NULL, delim);
+    }
+    *num = i;
+}
+
+double av_norm(float vec[], size_t num)
+{
+    size_t i;
+    double result = 0.0;
+
+    for (i = 0; i < num; i++)
+        result += vec[i] * vec[i];
+
+    return sqrt(result);
+}
+
+double av_dot(float vec1[], float vec2[], size_t num)
+{
+    size_t i;
+    double result = 0.0;
+
+    for (i = 0; i < num; i++)
+        result += vec1[i] * vec2[i];
+
+    return result;
+}
+
 int ff_inference_base_create(AVFilterContext *ctx,
                              InferenceBaseContext **base,
-                             InferenceParam *param) {
+                             InferenceParam *param)
+{
     int i, ret;
     InferenceBaseContext *s;
-    DNNModelInfo *info;
     VideoPP *vpp;
+    DNNModelInfo *info;
+    DNNModelIntelIEConfig config;
 
     if (!param)
         return AVERROR(EINVAL);
@@ -202,7 +248,7 @@ int ff_inference_base_create(AVFilterContext *ctx,
     // parameter sanity check
     if (param->batch_size <= 0) param->batch_size = 1;
 
-    DNNModelIntelIEConfig config = {
+    config = (DNNModelIntelIEConfig) {
         .model         = param->model_file,
         .labels        = param->labels_file,
         .device        = param->device_type,
@@ -251,6 +297,7 @@ int ff_inference_base_create(AVFilterContext *ctx,
     // vpp init
     vpp->swscale        = &sws_scale;
     vpp->crop_and_scale = &sw_crop_and_scale;
+    vpp->expect_format  = AV_PIX_FMT_BGR24;
 
     *base = s;
 #undef DNN_ERR_CHECK
