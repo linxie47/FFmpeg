@@ -55,6 +55,7 @@ typedef struct InferenceDetectContext {
     int    device_type;
 
     int    batch_size;
+    int    frame_number;
     int    every_nth_frame;
     float  threshold;
 
@@ -63,7 +64,6 @@ typedef struct InferenceDetectContext {
     int    input_is_image;
 
     char  *name;
-    char  *params;
 
     AVBufferRef *label_buf;
 } InferenceDetectContext;
@@ -308,7 +308,6 @@ static av_cold int detect_init(AVFilterContext *ctx)
         n = fread(buffer, sizeof(buffer), 1, fp);
         fclose(fp);
 
-        buffer[strcspn(buffer, "\n")] = 0;
         av_split(buffer, ",", _labels, &labels_num, 100);
 
         larray = av_mallocz(sizeof(*larray));
@@ -329,8 +328,6 @@ static av_cold int detect_init(AVFilterContext *ctx)
     p.backend_type    = s->backend_type;
     p.device_type     = s->device_type;
     p.batch_size      = s->batch_size;
-    p.every_nth_frame = s->every_nth_frame;
-    p.threshold       = s->threshold;
     p.input_precision = DNN_DATA_PRECISION_U8;
     p.input_layout    = DNN_DATA_LAYOUT_NCHW;
     p.input_is_image  = 1;
@@ -362,6 +359,9 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     AVFilterLink *outlink     = inlink->dst->outputs[0];
     InferTensorMeta tensor_meta = { };
 
+    if (s->frame_number % s->every_nth_frame != 0)
+        goto done;
+
     ret = ff_inference_base_filter_frame(s->base, in);
     if (ret < 0)
         goto fail;
@@ -372,6 +372,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     detect_postprocess(ctx, &tensor_meta, in);
 
+done:
+    s->frame_number++;
     return ff_filter_frame(outlink, in);
 fail:
     av_frame_free(&in);
@@ -383,12 +385,11 @@ static const AVOption inference_detect_options[] = {
     { "model",       "path to model file for network",  OFFSET(model_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
     { "device",      "running on device type",          OFFSET(device_type),     AV_OPT_TYPE_FLAGS,  { .i64 = DNN_TARGET_DEVICE_CPU }, 0, 12, FLAGS },
     { "label",       "label file path for detection",   OFFSET(label_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
-    { "interval",    "detect every Nth frame",          OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 }, 0, 15, FLAGS},
-    { "batch_size",  "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 }, 1, 1024, FLAGS},
-    { "threshold",   "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5}, 0, 1, FLAGS},
+    { "interval",    "detect every Nth frame",          OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1024, FLAGS},
+    { "batch_size",  "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1024, FLAGS},
+    { "threshold",   "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5}, 0, 1,    FLAGS},
 
     { "name",        "detection type name",             OFFSET(name),            AV_OPT_TYPE_STRING, .flags = FLAGS, "detection" },
-    { "filter_params", NULL,                            OFFSET(params),          AV_OPT_TYPE_STRING, .flags = FLAGS, "detection" },
     { NULL }
 };
 

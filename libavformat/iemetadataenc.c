@@ -241,8 +241,7 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
                     if (!bboxes->bbox[i]->label_buf) {
                         sprintf(tmp_str, "%s", "face");
                     } else {
-                        // object detection label index start from 1
-                        int label_id = bboxes->bbox[i]->label_id - 1;
+                        int label_id = bboxes->bbox[i]->label_id;
                         LabelsArray *array = (LabelsArray*)(bboxes->bbox[i]->label_buf->data);
                         sprintf(tmp_str, "%s", array->label[label_id]);
                     }

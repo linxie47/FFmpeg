@@ -36,8 +36,6 @@ typedef struct InferenceParam {
     char  *gpu_extension;
 
     int    batch_size;
-    int    every_nth_frame;
-    float  threshold;
 
     // TODO: inputs attributes are different
     int    input_layout;

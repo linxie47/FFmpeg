@@ -43,7 +43,6 @@
 #define PI 3.1415926
 #define MAX_MODEL_NUM 8
 #define FACE_FEATURE_VECTOR_LEN 256
-#define THRESHOLD_RECOGNITION   70
 
 static char string_age[]    = "age";
 static char string_gender[] = "gender";
@@ -65,11 +64,13 @@ typedef struct InferenceClassifyContext {
     char  *model_file;
     char  *feature_file;    ///< binary feature file for face identification
     int    feature_num;     ///< identification face feature number
+    double feature_angle;   ///< face identification threshold angle value
     int    loaded_num;
     int    backend_type;
     int    device_type;
 
     int    batch_size;
+    int    frame_number;
     int    every_nth_frame;
 
     void           *priv[MAX_MODEL_NUM];
@@ -375,7 +376,7 @@ static int face_identify_result_process(AVFilterContext *ctx,
         angles[i] = acos((dot_product - 0.0001f) /
                          (f->norm_std[i] * norm_feature)) /
                     PI * 180.0;
-        if (angles[i] < THRESHOLD_RECOGNITION && angles[i] < min_angle) {
+        if (angles[i] < s->feature_angle && angles[i] < min_angle) {
             label_id  = i;
             min_angle = angles[i];
         }
@@ -450,7 +451,6 @@ static av_cold int classify_init(AVFilterContext *ctx)
     p.backend_type    = s->backend_type;
     p.device_type     = s->device_type;
     p.batch_size      = s->batch_size;
-    p.every_nth_frame = s->every_nth_frame;
     p.input_precision = DNN_DATA_PRECISION_U8;
     p.input_layout    = DNN_DATA_LAYOUT_NCHW;
     p.input_is_image  = 1;
@@ -486,7 +486,6 @@ static av_cold int classify_init(AVFilterContext *ctx)
         n = fread(buffer, sizeof(buffer), 1, fp);
         fclose(fp);
 
-        buffer[strcspn(buffer, "\n")] = 0;
         av_split(buffer, ",", _labels, &labels_num, 100);
 
         larray = av_mallocz(sizeof(*larray));
@@ -565,6 +564,9 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     ClassifyArray           *c_array;
     InferClassificationMeta *c_meta;
 
+    if (s->frame_number % s->every_nth_frame != 0)
+        goto done;
+
     sd = av_frame_get_side_data(in, AV_FRAME_DATA_INFERENCE_DETECTION);
     if (!sd)
         goto done;
@@ -640,6 +642,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     }
 
 done:
+    s->frame_number++;
     return ff_filter_frame(outlink, in);
 fail:
     av_frame_free(&in);
@@ -691,15 +694,16 @@ static av_cold int config_output(AVFilterLink *outlink)
 }
 
 static const AVOption inference_classify_options[] = {
-    { "dnn_backend",  "DNN backend for model execution", OFFSET(backend_type),    AV_OPT_TYPE_FLAGS,  { .i64 = DNN_INTEL_IE },          0, 2,    FLAGS, "engine" },
-    { "model",        "path to model files for network", OFFSET(model_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
-    { "label",        "labels for classify",             OFFSET(labels),          AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
-    { "name",         "classify type names",             OFFSET(names),           AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
-    { "device",       "running on device type",          OFFSET(device_type),     AV_OPT_TYPE_FLAGS,  { .i64 = DNN_TARGET_DEVICE_CPU }, 0, 12,   FLAGS },
-    { "interval",     "do infer every Nth frame",        OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 },                     0, 15,   FLAGS },
-    { "batch_size",   "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },                     1, 1024, FLAGS },
-    { "feature_file", "registered face feature data",    OFFSET(feature_file),    AV_OPT_TYPE_STRING, { .str = NULL},                   0,    0, FLAGS, "face_identify" },
-    { "feature_num",  "registered face number",          OFFSET(feature_num),     AV_OPT_TYPE_INT,    { .i64 = 0},                      0, 1024, FLAGS, "face_identify" },
+    { "dnn_backend",    "DNN backend for model execution", OFFSET(backend_type),    AV_OPT_TYPE_FLAGS,  { .i64 = DNN_INTEL_IE },          0, 2,    FLAGS, "engine" },
+    { "model",          "path to model files for network", OFFSET(model_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
+    { "label",          "labels for classify",             OFFSET(labels),          AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
+    { "name",           "classify type names",             OFFSET(names),           AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
+    { "device",         "running on device type",          OFFSET(device_type),     AV_OPT_TYPE_FLAGS,  { .i64 = DNN_TARGET_DEVICE_CPU }, 0, 12,   FLAGS },
+    { "interval",       "do infer every Nth frame",        OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 },                     1, 1024, FLAGS },
+    { "batch_size",     "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },                     1, 1024, FLAGS },
+    { "feature_file",   "registered face feature data",    OFFSET(feature_file),    AV_OPT_TYPE_STRING, { .str = NULL},                   0,    0, FLAGS, "face_identify" },
+    { "feature_num",    "registered face number",          OFFSET(feature_num),     AV_OPT_TYPE_INT,    { .i64 = 0},                      0, 1024, FLAGS, "face_identify" },
+    { "identify_angle", "face identify threshold angle",   OFFSET(feature_angle),   AV_OPT_TYPE_DOUBLE, { .dbl = 70},                     0, 90,   FLAGS, "face_identify" },
     { NULL }
 };
 

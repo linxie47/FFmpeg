@@ -37,8 +37,6 @@ struct InferenceBaseContext
 {
     char *infer_type;
     int   batch_size;
-    int   every_nth_frame;
-    float threshold;
 
     DNNModule *module;
     DNNModel  *model;
@@ -186,14 +184,30 @@ void av_split(char *str, const char *delim, char **array, int *num, int max)
     if (!str || !delim || !array || !num)
         return;
 
-    p = strtok(str, delim);
-    while (p != NULL) {
-        array[i++] = p;
+    while (p = strtok(str, delim)) {
+        int j = 0;
+        char *s;
+        size_t end;
 
+        /* remove head blanks */
+        while (p[j] == '\n' || p[j] == ' ')
+            j++;
+
+        if (!p[j]) continue;
+
+        /* remove tail blanks */
+        s   = p + j;
+        end = strlen(s) - 1;
+        while (s[end] == '\n' || s[end] == ' ')
+            s[end--] = '\0';
+
+        array[i++] = s;
         av_assert0 (i < max);
 
-        p = strtok(NULL, delim);
+        /* string is cached */
+        str = NULL;
     }
+
     *num = i;
 }
 
@@ -285,8 +299,6 @@ int ff_inference_base_create(AVFilterContext *ctx,
     DNN_ERR_CHECK(ctx);
 
     s->batch_size      = param->batch_size;
-    s->every_nth_frame = param->every_nth_frame;
-    s->threshold       = param->threshold;
     s->preprocess      = param->preprocess;
 
     ret = s->model->create_model(s->model->model);
