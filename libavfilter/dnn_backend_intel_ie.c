@@ -41,17 +41,17 @@ static IETargetDeviceType get_device_type_id(DNNTargetDeviceType device_type) {
     case DNN_TARGET_DEVICE_BALANCED:
         return IE_Balanced;
     case DNN_TARGET_DEVICE_CPU:
-    case DNN_TARGET_DEVICE_CPU_FP16:
         return IE_CPU;
     case DNN_TARGET_DEVICE_GPU:
-    case DNN_TARGET_DEVICE_GPU_FP16:
         return IE_GPU;
     case DNN_TARGET_DEVICE_FPGA:
-    case DNN_TARGET_DEVICE_FPGA_FP16:
         return IE_FPGA;
     case DNN_TARGET_DEVICE_MYRIAD:
-    case DNN_TARGET_DEVICE_MYRIAD_FP16:
         return IE_MYRIAD;
+    case DNN_TARGET_DEVICE_HDDL:
+        return IE_HDDL;
+    case DNN_TARGET_DEVICE_GNA:
+        return IE_GNA;
     case DNN_TARGET_DEVICE_HETERO:
         return IE_HETERO;
     default:
