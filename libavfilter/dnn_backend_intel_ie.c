@@ -221,7 +221,7 @@ static DNNReturnType get_execute_result_intel_ie(void *model, DNNIOData *result)
     if (!model || !result)
         return DNN_ERROR;
 
-    result->data = IEGetResultSpace(ie_model->context, result->in_out_idx, &size);
+    result->data[0] = IEGetResultSpace(ie_model->context, result->in_out_idx, &size);
     if (!result->data)
         return DNN_ERROR;
 
@@ -330,6 +330,7 @@ static DNNReturnType set_output_info_intel_ie(void *model, DNNModelInfo *info)
 
 static DNNReturnType set_input_intel_ie(void *model, const DNNIOData *input)
 {
+    int i;
     IEData data;
     DNNIntelIEModel *ie_model = (DNNIntelIEModel *)model;
 
@@ -338,12 +339,12 @@ static DNNReturnType set_input_intel_ie(void *model, const DNNIOData *input)
 
     memset(&data, 0, sizeof(IEData));
 
-    data.size         = input->size;
+    for (i = 0; i < NUM_DATA_POINTS; i++) {
+        data.data[i]     = input->data[i];
+        data.linesize[i] = input->linesize[i];
+    }
     data.width        = input->width;
     data.height       = input->height;
-    data.widthStride  = input->width_stride;
-    data.heightStride = input->height_stride;
-    data.buffer       = (void *)input->data;
     data.channelNum   = input->channels;
     data.batchIdx     = input->batch_idx;
     data.precision    = get_precision(input->precision);

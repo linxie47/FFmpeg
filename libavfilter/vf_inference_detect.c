@@ -51,6 +51,7 @@ typedef struct InferenceDetectContext {
 
     char  *model_file;
     char  *label_file;
+    char  *vpp_format;
     int    backend_type;
     int    device_type;
 
@@ -176,13 +177,21 @@ static int detect_preprocess(InferenceBaseContext *base, int index, AVFrame *in,
     VideoPP *vpp = ff_inference_base_get_vpp(base);
     AVFrame *tmp = vpp->frames[index];
 
-    if (!vpp->scale_contexts[index]) {
-        *out = in;
-        return 0;
-    }
+    if (vpp->device == VPP_DEVICE_SW) {
+        if (!vpp->sw_vpp->scale_contexts[index]) {
+            *out = in;
+            return 0;
+        }
 
-    ret = vpp->swscale(vpp->scale_contexts[index], (const uint8_t * const*)in->data,
-                       in->linesize, 0, in->height, tmp->data, tmp->linesize);
+        ret = vpp->sw_vpp->scale(vpp->sw_vpp->scale_contexts[index],
+                (const uint8_t * const*)in->data,
+                in->linesize, 0, in->height, tmp->data, tmp->linesize);
+    } else {
+#if CONFIG_VAAPI
+        ret = vpp->va_vpp->scale(vpp->va_vpp, in,
+                tmp->width, tmp->height, tmp->data, tmp->linesize);
+#endif
+    }
     *out = tmp;
     return ret;
 }
@@ -194,7 +203,8 @@ static int query_formats(AVFilterContext *context)
         AV_PIX_FMT_YUV420P,  AV_PIX_FMT_YUV422P,  AV_PIX_FMT_YUV444P,
         AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ444P,
         AV_PIX_FMT_YUV410P,  AV_PIX_FMT_YUV411P,  AV_PIX_FMT_GRAY8,
-        AV_PIX_FMT_BGR24,    AV_PIX_FMT_BGRA,     AV_PIX_FMT_NONE};
+        AV_PIX_FMT_BGR24,    AV_PIX_FMT_BGRA,     AV_PIX_FMT_VAAPI,
+        AV_PIX_FMT_NONE};
 
     formats_list = ff_make_format_list(pixel_formats);
     if (!formats_list) {
@@ -207,7 +217,8 @@ static int query_formats(AVFilterContext *context)
 
 static int config_input(AVFilterLink *inlink)
 {
-    int i;
+    int i, ret;
+    AVFrame *frame;
     AVFilterContext      *ctx        = inlink->dst;
     InferenceDetectContext *s        = ctx->priv;
     enum AVPixelFormat expect_format = AV_PIX_FMT_BGR24;
@@ -222,51 +233,86 @@ static int config_input(AVFilterLink *inlink)
                info->is_image[i], info->precision[i], info->layout[i]);
     }
 
+    // right now, no model needs multiple inputs
+    av_assert0(info->numbers == 1);
+
     vpp->device = (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) ? VPP_DEVICE_HW : VPP_DEVICE_SW;
 
-    // TODO: now just handle sw vpp
-    for (i = 0; i < info->numbers; i++) {
-        if (expect_format   != inlink->format ||
-            info->width[i]  != inlink->w      ||
-            info->height[i] != inlink->h)
-        {
-            int ret;
-            AVFrame *frame;
+    // allocate frame to save scaled output
+    frame = av_frame_alloc();
+    if (!frame)
+        return AVERROR(ENOMEM);
+    frame->width   = info->width[0];
+    frame->height  = info->height[0];
+    frame->format  = expect_format;
+    vpp->frames[0] = frame;
 
-            vpp->scale_contexts[i] = sws_getContext(
-                inlink->w,      inlink->h,       inlink->format,
-                info->width[i], info->height[i], expect_format,
-                SWS_BILINEAR, NULL, NULL, NULL);
+    if (vpp->device == VPP_DEVICE_SW) {
+        int need_scale = expect_format   != inlink->format ||
+                         info->width[0]  != inlink->w      ||
+                         info->height[0] != inlink->h;
 
-            if (!vpp->scale_contexts[i]) {
-                av_log(ctx, AV_LOG_ERROR, "Impossible to create scale context");
+        if (need_scale) {
+            if (av_frame_get_buffer(frame, 0) < 0) {
+                av_frame_free(&frame);
+                return AVERROR(ENOMEM);
+            }
+
+            vpp->sw_vpp->scale_contexts[0] = sws_getContext(
+                    inlink->w, inlink->h, inlink->format,
+                    info->width[0], info->height[0], expect_format,
+                    SWS_BILINEAR, NULL, NULL, NULL);
+
+            if (!vpp->sw_vpp->scale_contexts[0]) {
+                av_log(ctx, AV_LOG_ERROR, "Impossible to create scale context\n");
+                av_frame_free(&frame);
                 return AVERROR(EINVAL);
             }
-
-            frame = av_frame_alloc();
-            if (!frame)
-                return AVERROR(ENOMEM);
-
-            frame->format = expect_format;
-            frame->width  = info->width[i];
-            frame->height = info->height[i];
-
-            ret = av_frame_get_buffer(frame, 0);
-            if (ret < 0) {
-                av_frame_free(&frame);
-                return ret;
-            }
-            vpp->frames[i] = frame;
         }
+    } else {
+#if CONFIG_VAAPI
+        vpp->va_vpp = av_mallocz(sizeof(*vpp->va_vpp));
+        if (!vpp->va_vpp) {
+            ret = AVERROR(ENOMEM);
+            goto fail;
+        }
+
+        ret = va_vpp_device_create(vpp->va_vpp, inlink);
+        if (ret < 0) {
+            av_log(ctx, AV_LOG_ERROR, "Create va vpp device failed\n");
+            ret = AVERROR(EINVAL);
+            goto fail;
+        }
+
+        ret = va_vpp_surface_alloc(vpp->va_vpp,
+                info->width[0], info->height[0], s->vpp_format);
+        if (ret < 0) {
+            av_log(ctx, AV_LOG_ERROR, "Create va surface failed\n");
+            ret = AVERROR(EINVAL);
+            goto fail;
+        }
+
+        frame->format = vpp->va_vpp->av_format;
+#endif
     }
 
     return 0;
+fail:
+    av_frame_free(&frame);
+#if CONFIG_VAAPI
+    if (vpp->va_vpp) {
+        va_vpp_device_free(vpp->va_vpp);
+        av_freep(&vpp->va_vpp);
+    }
+#endif
+    return ret;
 }
 
 static int config_output(AVFilterLink *outlink)
 {
     AVFilterContext      *ctx = outlink->src;
     InferenceDetectContext *s = ctx->priv;
+    VideoPP *vpp              = ff_inference_base_get_vpp(s->base);
 
     DNNModelInfo *info = ff_inference_base_get_output_info(s->base);
 
@@ -277,7 +323,18 @@ static int config_output(AVFilterLink *outlink)
             info->is_image[i], info->precision[i], info->layout[i]);
     }
 
-    // TODO: define how to handle model output data
+#if CONFIG_VAAPI
+    if (vpp->device == VPP_DEVICE_HW) {
+        if (!vpp->va_vpp || !vpp->va_vpp->hw_frames_ref) {
+            av_log(ctx, AV_LOG_ERROR, "The input must have a hardware frame "
+                    "reference.\n");
+            return AVERROR(EINVAL);
+        }
+        outlink->hw_frames_ctx = av_buffer_ref(vpp->va_vpp->hw_frames_ref);
+        if (!outlink->hw_frames_ctx)
+            return AVERROR(ENOMEM);
+    }
+#endif
 
     return 0;
 }
@@ -385,6 +442,7 @@ static const AVOption inference_detect_options[] = {
     { "model",       "path to model file for network",  OFFSET(model_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
     { "device",      "running on device type",          OFFSET(device_type),     AV_OPT_TYPE_FLAGS,  { .i64 = DNN_TARGET_DEVICE_CPU }, 0, 12, FLAGS },
     { "label",       "label file path for detection",   OFFSET(label_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
+    { "vpp_format",  "specify vpp output format",       OFFSET(vpp_format),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
     { "interval",    "detect every Nth frame",          OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1024, FLAGS},
     { "batch_size",  "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1024, FLAGS},
     { "threshold",   "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5}, 0, 1,    FLAGS},

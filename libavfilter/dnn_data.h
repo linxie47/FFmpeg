@@ -20,6 +20,8 @@
 #ifndef AVFILTER_DNN_DATA_H
 #define AVFILTER_DNN_DATA_H
 
+#include <stdint.h>
+
 /**
 * @enum TargetDevice
 * @brief Describes known device types
@@ -113,12 +115,12 @@ typedef struct DNNDevice {
 * spencial for single 1D: height/height_stride/channels are 1 width_stride=width, output only
 */
 typedef struct DNNIOData {
-    void *data;             // the type depend on the data precision
+#define NUM_DATA_POINTS 4
+    uint8_t *data[NUM_DATA_POINTS];
+    int  linesize[NUM_DATA_POINTS];
     unsigned int size;      // size=width x height x channels,it is for 1D output/input. unit is byte.
     unsigned int width;
     unsigned int height;
-    unsigned int width_stride;      // it is for HW memory or padding memory
-    unsigned int height_stride;
     unsigned int channels;
     // the index of the batch when batch size is bigger than 1. default value is zero when batch size is 1.
     unsigned int batch_idx;

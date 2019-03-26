@@ -19,8 +19,17 @@
 #ifndef AVFILTER_INFERENCE_H
 #define AVFILTER_INFERENCE_H
 
+#if CONFIG_VAAPI
+#include <va/va.h>
+#endif
+
 #include "libavutil/common.h"
 #include "libswscale/swscale.h"
+#include "libavutil/hwcontext.h"
+#if CONFIG_VAAPI
+#include "libavutil/hwcontext_vaapi.h"
+#endif
+
 #include "dnn_interface.h"
 
 typedef struct InferenceBaseContext InferenceBaseContext;
@@ -47,25 +56,71 @@ typedef struct InferenceParam {
 
 #define MAX_VPP_NUM DNN_INPUT_OUTPUT_NUM
 
+/*
+ * Vpp device type detected according to frame format
+ */
 typedef enum { VPP_DEVICE_HW, VPP_DEVICE_SW } VPPDevice;
 
-typedef struct VideoPP {
-    int      device;
-    int      expect_format;
-    void    *scale_contexts[MAX_VPP_NUM];
-    AVFrame *frames[MAX_VPP_NUM];          //<! frames to save vpp output
+typedef struct _SwVpp    SwVpp;
 
-    int    (*swscale)(struct SwsContext *context,
-                      const uint8_t * const srcSlice[],
-                      const int srcStride[], int srcSliceY,
-                      int srcSliceH, uint8_t *const dst[],
-                      const int dstStride[]);
-    int    (*crop_and_scale)(AVFrame *frame,
-                             float crop_x0,  float crop_y0,
-                             float crop_x1,  float crop_y1,
-                             int   scale_w,  int   scale_h,
-                             enum AVPixelFormat scale_format,
-                             uint8_t *dst[], int   dstStride[]);
+typedef struct _VAAPIVpp VAAPIVpp;
+
+/*
+ * Generic rectangle structure consists of two diagonal points
+ */
+typedef struct Rect {
+    float x0; float y0; float x1; float y1;
+} Rect;
+
+#if CONFIG_VAAPI
+struct _VAAPIVpp {
+    AVVAAPIDeviceContext *hwctx;
+    AVBufferRef  *hw_frames_ref;
+    VASurfaceID   va_surface;
+    VAConfigID    va_config;
+    VAContextID   va_context;
+
+    VAImageFormat *format_list; //!< Surface formats which can be used with this device.
+    int            nb_formats;
+
+    VAImage            va_image;
+    VAImageFormat      va_format_selected;
+    enum AVPixelFormat av_format;
+
+    int  (*scale)(VAAPIVpp *va_vpp, AVFrame *input,
+                  int scale_w,      int scale_h,
+                  uint8_t *data[],  int stride[]);
+
+    int  (*crop_and_scale)(VAAPIVpp *va_vpp, AVFrame *input,
+                           Rect *crop_rect,
+                           int scale_w, int scale_h,
+                           uint8_t *data[],  int stride[]);
+};
+#endif
+
+struct _SwVpp {
+    struct SwsContext *scale_contexts[MAX_VPP_NUM];
+
+    int  (*scale)(struct SwsContext *context,
+                  const uint8_t * const srcSlice[],
+                  const int srcStride[], int srcSliceY,
+                  int srcSliceH, uint8_t *const dst[],
+                  const int dstStride[]);
+
+    int  (*crop_and_scale)(AVFrame *frame, Rect *crop_rect,
+                           int   scale_w,  int   scale_h,
+                           enum AVPixelFormat scale_format,
+                           uint8_t *dst[], int   dstStride[]);
+};
+
+typedef struct VideoPP {
+    int       device;
+    int       expect_format;
+    AVFrame  *frames[MAX_VPP_NUM];  //<! frames to save vpp output
+    SwVpp    *sw_vpp;
+#if CONFIG_VAAPI
+    VAAPIVpp *va_vpp;
+#endif
 } VideoPP;
 
 #define MAX_TENSOR_DIM_NUM 8
@@ -151,5 +206,15 @@ int ff_inference_base_get_infer_result(InferenceBaseContext *base, int index, In
 DNNModelInfo* ff_inference_base_get_input_info(InferenceBaseContext *base);
 DNNModelInfo* ff_inference_base_get_output_info(InferenceBaseContext *base);
 VideoPP*      ff_inference_base_get_vpp(InferenceBaseContext *base);
+
+#if CONFIG_VAAPI
+int va_vpp_device_create(VAAPIVpp *ctx, AVFilterLink *inlink);
+
+int va_vpp_device_free(VAAPIVpp *ctx);
+
+int va_vpp_surface_alloc(VAAPIVpp *ctx, size_t width, size_t height, const char *format);
+
+int va_vpp_surface_release(VAAPIVpp *ctx);
+#endif
 
 #endif

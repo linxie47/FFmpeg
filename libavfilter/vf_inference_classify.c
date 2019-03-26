@@ -62,6 +62,7 @@ typedef struct InferenceClassifyContext {
     char  *labels;
     char  *names;
     char  *model_file;
+    char  *vpp_format;
     char  *feature_file;    ///< binary feature file for face identification
     int    feature_num;     ///< identification face feature number
     double feature_angle;   ///< face identification threshold angle value
@@ -410,7 +411,8 @@ static int query_formats(AVFilterContext *context)
         AV_PIX_FMT_YUV420P,  AV_PIX_FMT_YUV422P,  AV_PIX_FMT_YUV444P,
         AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ444P,
         AV_PIX_FMT_YUV410P,  AV_PIX_FMT_YUV411P,  AV_PIX_FMT_GRAY8,
-        AV_PIX_FMT_BGR24,    AV_PIX_FMT_BGRA,     AV_PIX_FMT_NONE};
+        AV_PIX_FMT_BGR24,    AV_PIX_FMT_BGRA,     AV_PIX_FMT_VAAPI,
+        AV_PIX_FMT_NONE};
 
     formats_list = ff_make_format_list(pixel_formats);
     if (!formats_list) {
@@ -511,11 +513,6 @@ static av_cold int classify_init(AVFilterContext *ctx)
         } else if (strstr(names[i], "age") && strstr(names[i], "gend")) {
             s->post_process[i] = &age_gender_classify_result_process;
         } else if (strstr(names[i], "face")) {
-            VideoPP *vpp = ff_inference_base_get_vpp(s->infer_bases[i]);
-
-            // face reidentification model requires RGB format
-            vpp->expect_format = AV_PIX_FMT_RGB24;
-
             s->init[i]         = &face_identify_init;
             s->uninit[i]       = &face_identify_uninit;
             s->post_process[i] = &face_identify_result_process;
@@ -603,16 +600,27 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
             DNNModelInfo *iinfo = ff_inference_base_get_input_info(base);
             DNNModelInfo *oinfo = ff_inference_base_get_output_info(base);
 
-            ret = vpp->crop_and_scale(in,
-                                      bbox->x_min * in->width,
-                                      bbox->y_min * in->height,
-                                      bbox->x_max * in->width,
-                                      bbox->y_max * in->height,
-                                      iinfo->width[0],
-                                      iinfo->height[0],
-                                      vpp->expect_format,
-                                      tmp->data,
-                                      tmp->linesize);
+            Rect crop_rect = (Rect) {
+                .x0 = bbox->x_min * in->width,
+                .y0 = bbox->y_min * in->height,
+                .x1 = bbox->x_max * in->width,
+                .y1 = bbox->y_max * in->height,
+            };
+
+            if (vpp->device == VPP_DEVICE_SW) {
+                ret = vpp->sw_vpp->crop_and_scale(in, &crop_rect,
+                        iinfo->width[0], iinfo->height[0],
+                        vpp->expect_format, tmp->data, tmp->linesize);
+            } else {
+#if CONFIG_VAAPI
+                ret = vpp->va_vpp->crop_and_scale(vpp->va_vpp, in, &crop_rect,
+                        iinfo->width[0], iinfo->height[0], tmp->data, tmp->linesize);
+#endif
+            }
+            if (ret != 0) {
+                ret = AVERROR(EINVAL);
+                goto fail;
+            }
 
             // TODO: support dynamic batch for faces
             ff_inference_base_submit_frame(base, tmp, 0, 0);
@@ -651,41 +659,84 @@ fail:
 
 static av_cold int config_input(AVFilterLink *inlink)
 {
-    int i, j;
-    AVFilterContext      *ctx        = inlink->dst;
-    InferenceClassifyContext *s      = ctx->priv;
+    int i, ret;
+    AVFrame *frame;
+
+    AVFilterContext             *ctx = inlink->dst;
+    InferenceClassifyContext      *s = ctx->priv;
     enum AVPixelFormat expect_format = AV_PIX_FMT_BGR24;
-    const AVPixFmtDescriptor *desc   = av_pix_fmt_desc_get(inlink->format);
+    const AVPixFmtDescriptor   *desc = av_pix_fmt_desc_get(inlink->format);
 
     for (i = 0; i < s->loaded_num; i++) {
         InferenceBaseContext *base = s->infer_bases[i];
-        DNNModelInfo *info         = ff_inference_base_get_input_info(base);
-        VideoPP *vpp               = ff_inference_base_get_vpp(base);
+        DNNModelInfo         *info = ff_inference_base_get_input_info(base);
+        VideoPP               *vpp = ff_inference_base_get_vpp(base);
+
+        // right now, no model needs multiple inputs
+        av_assert0(info->numbers == 1);
 
         vpp->device = (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) ?
             VPP_DEVICE_HW : VPP_DEVICE_SW;
 
         // allocate avframes to save preprocessed data
-        for (j = 0; j < info->numbers; j++) {
-            int ret;
-            AVFrame *frame = av_frame_alloc();
-            if (!frame)
-                return AVERROR(ENOMEM);
+        frame = av_frame_alloc();
+        if (!frame)
+            return AVERROR(ENOMEM);
+        frame->width   = info->width[0];
+        frame->height  = info->height[0];
+        frame->format  = expect_format;
+        vpp->frames[0] = frame;
 
-            frame->format = expect_format;
-            frame->width  = info->width[j];
-            frame->height = info->height[j];
-
-            ret = av_frame_get_buffer(frame, 0);
-            if (ret < 0) {
-                av_frame_free(&frame);
-                return ret;
+        if (vpp->device == VPP_DEVICE_SW) {
+            if (ret = av_frame_get_buffer(frame, 0) < 0)
+                goto fail;
+        } else {
+#if CONFIG_VAAPI
+            vpp->va_vpp = av_mallocz(sizeof(*vpp->va_vpp));
+            if (!vpp->va_vpp) {
+                ret = AVERROR(ENOMEM);
+                goto fail;
             }
-            vpp->frames[j] = frame;
+
+            ret = va_vpp_device_create(vpp->va_vpp, inlink);
+            if (ret < 0) {
+                av_log(ctx, AV_LOG_ERROR, "Create va vpp device failed\n");
+                ret = AVERROR(EINVAL);
+                goto fail;
+            }
+
+            ret = va_vpp_surface_alloc(vpp->va_vpp,
+                    info->width[0], info->height[0], s->vpp_format);
+            if (ret < 0) {
+                av_log(ctx, AV_LOG_ERROR, "Create va surface failed\n");
+                ret = AVERROR(EINVAL);
+                goto fail;
+            }
+
+            frame->format = vpp->va_vpp->av_format;
+#endif
         }
     }
 
     return 0;
+fail:
+    for (i = 0; i < s->loaded_num; i++) {
+        VideoPP *vpp = ff_inference_base_get_vpp(s->infer_bases[i]);
+
+        frame = vpp->frames[0];
+        if (!frame)
+            continue;
+
+        av_frame_free(&frame);
+
+#if CONFIG_VAAPI
+        if (vpp->va_vpp) {
+            va_vpp_device_free(vpp->va_vpp);
+            av_freep(&vpp->va_vpp);
+        }
+#endif
+    }
+    return ret;
 }
 
 static av_cold int config_output(AVFilterLink *outlink)
@@ -698,6 +749,7 @@ static const AVOption inference_classify_options[] = {
     { "model",          "path to model files for network", OFFSET(model_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
     { "label",          "labels for classify",             OFFSET(labels),          AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
     { "name",           "classify type names",             OFFSET(names),           AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
+    { "vpp_format",     "specify vpp output format",       OFFSET(vpp_format),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
     { "device",         "running on device type",          OFFSET(device_type),     AV_OPT_TYPE_FLAGS,  { .i64 = DNN_TARGET_DEVICE_CPU }, 0, 12,   FLAGS },
     { "interval",       "do infer every Nth frame",        OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 },                     1, 1024, FLAGS },
     { "batch_size",     "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },                     1, 1024, FLAGS },
