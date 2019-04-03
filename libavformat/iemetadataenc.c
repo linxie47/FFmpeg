@@ -46,6 +46,8 @@ typedef struct IeMetaDataMuxer {
     unsigned int current_escape_num;
     char *source;
     char *tag;
+    int id_number;
+    int output_type;
 } IeMetaDataMuxer;
 
 static int fill_content(AVFormatContext *s, const char *str, int flush)
@@ -184,12 +186,20 @@ static int init(AVFormatContext *s)
     }
     md->meta_data_length = 0;
     md->current_escape_num = 0;
+    md->id_number = 0;
+
+    if (md->output_type == 1)
+        pack(s, "{");
+
     return 0;
 }
 
 static void deinit(AVFormatContext *s)
 {
     IeMetaDataMuxer *md = s->priv_data;
+    if (md->output_type == 1) {
+        pack(s, "n}w");
+    }
     av_free(md->meta_data_strings);
 
 }
@@ -214,11 +224,24 @@ static int jhead_write(AVFormatContext *s, AVFrame *frm_data)
         av_q2d(s->streams[0]->time_base) * frm_data->pts * 1000000000 :
         -1;
 
+    if (md->output_type == 1 && md->id_number != 0) {
+        pack(s, ",");
+    }
+
     snprintf(tmp_str, TMP_STR_BUF_SIZE, "\"resolution\":{\"width\":%d,\"height\":%d},\n",
             frm_data->width, frm_data->height);
-    pack(s, "{IsS", "timestamp", nano_ts,
-            "source", md->source,
-            tmp_str);
+    if (md->output_type == 0)
+        pack(s, "{IsS", "timestamp", nano_ts,
+                "source", md->source,
+                tmp_str);
+    else {
+        char id[80];
+        sprintf(id, "id-%d", md->id_number++);
+        pack(s, "(IsS", id, "timestamp", nano_ts,
+                "source", md->source,
+                tmp_str);
+    }
+
     if (!md->tag)
         sprintf(tmp_str, "\"tags\":{\"custom_key\":\"custom_value\"},\n");
     else {
@@ -248,7 +271,10 @@ static int jtail_write(AVFormatContext *s)
 {
     IeMetaDataMuxer *md = s->priv_data;
 
-    pack(s, "]n}nw");
+    if (md->output_type == 0)
+        pack(s, "]n}nw");
+    else
+        pack(s, "]n}w");
     md->meta_data_length = 0;
 
     return 0;
@@ -349,6 +375,7 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
 static const AVOption options[] = {
     { "source_url", "the source url/path to put into the json metadata", OFFSET(source), AV_OPT_TYPE_STRING, { .str = "auto" }, 0, 0, ENC },
     { "custom_tag", "the customer tag and value, usage: -custom_tag \"key1:value1,key2:value2\"", OFFSET(tag), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, ENC },
+    { "output_type", "it will output meta data frame by frame by default 0, otherwise 1 means file output which group all the data. usage: -output_type 1\"", OFFSET(output_type), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1,ENC },
     { NULL },
 };
 
