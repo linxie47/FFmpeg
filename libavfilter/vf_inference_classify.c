@@ -44,9 +44,6 @@
 #define MAX_MODEL_NUM 8
 #define FACE_FEATURE_VECTOR_LEN 256
 
-static char string_age[]    = "age";
-static char string_gender[] = "gender";
-
 typedef int (*ClassifyInit)(AVFilterContext *ctx, size_t index);
 
 typedef int (*ClassifyUnInit)(AVFilterContext *ctx, size_t index);
@@ -61,7 +58,9 @@ typedef struct InferenceClassifyContext {
 
     char  *labels;
     char  *names;
+
     char  *model_file;
+    char  *model_proc;
     char  *vpp_format;
     char  *feature_file;    ///< binary feature file for face identification
     int    feature_num;     ///< identification face feature number
@@ -81,6 +80,10 @@ typedef struct InferenceClassifyContext {
     ClassifyInit    init[MAX_MODEL_NUM];
     ClassifyUnInit  uninit[MAX_MODEL_NUM];
     ClassifyProcess post_process[MAX_MODEL_NUM];
+
+    void *proc_config[MAX_MODEL_NUM];
+    ModelInputPreproc   model_preproc[MAX_MODEL_NUM];
+    ModelOutputPostproc model_postproc[MAX_MODEL_NUM];
 } InferenceClassifyContext;
 
 typedef struct FaceIdentifyContext {
@@ -118,95 +121,189 @@ static void infer_classify_metadata_buffer_free(void *opaque, uint8_t *data)
     av_free(data);
 }
 
-static av_cold void dump_emotion(AVFilterContext *ctx, int label_id,
+static av_cold void dump_softmax(AVFilterContext *ctx, char *name, int label_id,
                                  float conf, AVBufferRef *label_buf)
 {
     LabelsArray *array = (LabelsArray *)label_buf->data;
 
-    av_log(ctx, AV_LOG_DEBUG, "CLASSIFY META - Label id:%d Emotion:%s Conf:%f\n",
-           label_id, array->label[label_id], conf);
+    av_log(ctx, AV_LOG_DEBUG, "CLASSIFY META - Label id:%d %s:%s Conf:%f\n",
+           label_id, name, array->label[label_id], conf);
 }
 
-static int emotion_classify_result_process(AVFilterContext *ctx,
-                                           int detect_id,
-                                           int result_id,
-                                           int model_index,
-                                           InferTensorMeta *meta,
-                                           InferClassificationMeta *c_meta)
+static av_cold void dump_tensor_value(AVFilterContext *ctx, char *name, float value)
 {
-    int i, label_id = 0;
-    InferenceClassifyContext *s = ctx->priv;
-    const float *emo_confidence = (float *)meta->data;
-    size_t labels_num           = meta->dims[2];
-    float max                   = emo_confidence[0];
+    av_log(ctx, AV_LOG_DEBUG, "CLASSIFY META - %s:%1.2f\n", name, value);
+}
 
-    InferClassification *classify = av_mallocz(sizeof(*classify));
+static void find_max_element_index(const float *array, int len,
+                                   int *index, float *value)
+{
+    int i;
+    *index = 0;
+    *value = array[0];
+    for (i = 1; i < len; i++) {
+        if (array[i] > *value) {
+            *index = i;
+            *value = array[i];
+        }
+    }
+}
+
+static int attributes_to_text(AVFilterContext *ctx,
+                              int detect_id,
+                              OutputPostproc *proc,
+                              InferTensorMeta *meta,
+                              InferClassificationMeta *c_meta)
+{
+    InferClassification *classify;
+    uint32_t method_max, method_compound, method_index;
+    const float *data = (const float *)meta->data;
+
+    method_max      = !strcmp(proc->method, "max");
+    method_compound = !strcmp(proc->method, "compound");
+    method_index    = !strcmp(proc->method, "index");
+
+    if (!data) return -1;
+
+    classify = av_mallocz(sizeof(*classify));
     if (!classify)
         return AVERROR(ENOMEM);
 
-    // Get the emotion with max confidence
-    for (i = 1; i < labels_num; i++)
-        if (emo_confidence[i] > max) { max = emo_confidence[i]; label_id = i; }
+    if (method_max) {
+        int    index;
+        float  confidence;
+        size_t n = meta->dims[1];
 
-    classify->detect_id  = detect_id;
-    classify->name       = s->name_array[model_index];
-    classify->label_id   = label_id;
-    classify->confidence = emo_confidence[label_id];
-    classify->label_buf  = av_buffer_ref(s->label_bufs[model_index]);
+        find_max_element_index(data, n, &index, &confidence);
 
-    dump_emotion(ctx, classify->label_id, classify->confidence, classify->label_buf);
+        classify->detect_id  = detect_id;
+        classify->name       = proc->attribute_name;
+        classify->label_id   = index;
+        classify->confidence = confidence;
+        classify->label_buf  = av_buffer_ref(proc->labels);
 
-    av_dynarray_add(&c_meta->c_array->classifications, &c_meta->c_array->num, classify);
+        dump_softmax(ctx, classify->name, classify->label_id,
+                     classify->confidence,classify->label_buf);
+    } else if (method_compound) {
+        int i;
+        double threshold  = 0.5;
+        float  confidence = 0;
+        char attributes[4096] = {};
+        LabelsArray *array;
 
-    return 0;
-}
+        if (proc->threshold != 0)
+            threshold = proc->threshold;
 
-static av_cold void dump_gender(AVFilterContext *ctx, int label_id,
-                                float conf, AVBufferRef *label_buf)
-{
-    LabelsArray *array = (LabelsArray *)label_buf->data;
+        array = (LabelsArray *)proc->labels->data;
+        for (i = 0; i < array->num; i++) {
+            if (data[i] >= threshold)
+                strncat(attributes, array->label[i], (strlen(array->label[i]) + 1));
+            if (data[i] > confidence)
+                confidence = data[i];
+        }
 
-    av_log(ctx, AV_LOG_DEBUG, "CLASSIFY META - Gender:%s Conf:%1.2f\n",
-           array->label[label_id], conf);
-}
+        classify->name = proc->attribute_name;
+        classify->confidence = confidence;
 
-static av_cold void dump_age(AVFilterContext *ctx, float age)
-{
-    av_log(ctx, AV_LOG_DEBUG, "CLASSIFY META - Age:%1.2f\n", age);
-}
+        av_log(ctx, AV_LOG_DEBUG, "Attributes: %s\n", attributes);
+        // TODO: to add into side data
+        av_free(classify);
+        return 0;
+    } else if (method_index) {
+        int i;
+        char attributes[1024] = {};
+        LabelsArray *array;
 
-static int age_gender_classify_result_process(AVFilterContext *ctx,
-                                              int detect_id,
-                                              int result_id,
-                                              int model_index,
-                                              InferTensorMeta *meta,
-                                              InferClassificationMeta *c_meta)
-{
-    InferenceClassifyContext *s = ctx->priv;
-    const float *data = (float *)meta->data;
+        array = (LabelsArray *)proc->labels->data;
+        for (i = 0; i < array->num; i++) {
+            int value = data[i];
+            if (value < 0 || value >= array->num)
+                break;
+            strncat(attributes, array->label[value], (strlen(array->label[value]) + 1));
+        }
 
-    InferClassification *classify = av_mallocz(sizeof(*classify));
-    if (!classify)
-        return AVERROR(ENOMEM);
+        classify->name = proc->attribute_name;
 
-    classify->detect_id  = detect_id;
-
-    if (result_id == 0) {
-        // Age
-        classify->name  = string_age;
-        classify->value = *data * 100.0;
-        dump_age(ctx, classify->value);
-    } else {
-        // Gender
-        classify->name       = string_gender;
-        // 0 - Femal, 1 - Male
-        classify->label_id   = data[0] > data[1] ? 0 : 1;
-        classify->confidence = data[classify->label_id];
-        classify->label_buf  = av_buffer_ref(s->label_bufs[model_index]);
-        dump_gender(ctx, classify->label_id, classify->confidence, classify->label_buf);
+        av_log(ctx, AV_LOG_DEBUG, "Attributes: %s\n", attributes);
+        // TODO: to add into side data
+        av_free(classify);
+        return 0;
     }
 
     av_dynarray_add(&c_meta->c_array->classifications, &c_meta->c_array->num, classify);
+    return 0;
+}
+
+static int tensor_to_text(AVFilterContext *ctx,
+                          int detect_id,
+                          OutputPostproc *proc,
+                          InferTensorMeta *meta,
+                          InferClassificationMeta *c_meta)
+{
+    InferClassification *classify;
+    const float *data = (const float *)meta->data;
+    double scale = 1.0;
+
+    if (!data) return -1;
+
+    classify = av_mallocz(sizeof(*classify));
+    if (!classify)
+        return AVERROR(ENOMEM);
+
+    if (proc->tensor2text_scale != 0)
+        scale = proc->tensor2text_scale;
+
+    classify->detect_id = detect_id;
+    classify->name      = proc->attribute_name;
+    classify->value     = *data * scale;
+
+    dump_tensor_value(ctx, classify->name, classify->value);
+
+    av_dynarray_add(&c_meta->c_array->classifications, &c_meta->c_array->num, classify);
+    return 0;
+}
+
+static int commmon_postprocess(AVFilterContext *ctx,
+                               int detect_id,
+                               int result_id,
+                               int model_id,
+                               InferTensorMeta *meta,
+                               InferClassificationMeta *c_meta)
+{
+    int proc_id;
+    InferenceClassifyContext *s = ctx->priv;
+    InferenceBaseContext *base  = s->infer_bases[model_id];
+
+    OutputPostproc *proc;
+    DNNModelInfo *info = ff_inference_base_get_output_info(base);
+
+    // search model postproc
+    for (proc_id = 0; proc_id < MAX_MODEL_OUTPUT; proc_id++) {
+        char *proc_layer_name = s->model_postproc[model_id].procs[proc_id].layer_name;
+
+        // skip this output process
+        if (!proc_layer_name)
+            continue;
+
+        if (!strcmp(info->layer_name[result_id], proc_layer_name))
+            break;
+    }
+
+    if (proc_id == MAX_MODEL_OUTPUT) {
+        av_log(ctx, AV_LOG_DEBUG, "Could not find proc:%s\n", info->layer_name[result_id]);
+        return 0;
+    }
+
+    proc = &s->model_postproc[model_id].procs[proc_id];
+
+    if (proc->converter == NULL)
+        return 0;
+
+    if (!strcmp(proc->converter, "attributes"))
+        return attributes_to_text(ctx, detect_id, proc, meta, c_meta);
+
+    if (!strcmp(proc->converter, "tensor2text"))
+        return tensor_to_text(ctx, detect_id, proc, meta, c_meta);
 
     return 0;
 }
@@ -227,13 +324,7 @@ static int face_identify_init(AVFilterContext *ctx, size_t index)
 
     av_assert0(index < MAX_MODEL_NUM);
 
-    if (fseek(fp, 0, SEEK_END)) {
-        av_log(ctx, AV_LOG_ERROR, "Couldn't seek to the end of feature file.\n");
-        fclose(fp);
-        return AVERROR(EINVAL);
-    }
-
-    feature_size = ftell(fp);
+    feature_size = ff_get_file_size(fp);
 
     if (feature_size == -1) {
         fclose(fp);
@@ -427,11 +518,12 @@ static av_cold int classify_init(AVFilterContext *ctx)
 {
     InferenceClassifyContext *s = ctx->priv;
     int i, ret;
-    int model_num = 0, label_num = 0, name_num = 0;
+    int model_num = 0, model_proc_num = 0, label_num = 0, name_num = 0;
     const int max_num = MAX_MODEL_NUM;
     char  *names[MAX_MODEL_NUM] = { };
     char *models[MAX_MODEL_NUM] = { };
     char *labels[MAX_MODEL_NUM] = { };
+    char *models_proc[MAX_MODEL_NUM] = { };
     InferenceParam p = {};
 
     av_assert0(s->model_file);
@@ -448,6 +540,13 @@ static av_cold int classify_init(AVFilterContext *ctx)
     for (i = 0; i < name_num; i++)
         av_log(ctx, AV_LOG_INFO, "name[%d]:%s\n", i, names[i]);
 
+    av_split(s->model_proc, "&", models_proc, &model_proc_num, max_num);
+    for (i = 0; i < model_proc_num; i++)
+        av_log(ctx, AV_LOG_INFO, "proc[%d]:%s\n", i, models_proc[i]);
+
+    // TODO: uncomment this after face reidentify use proc file
+    // av_assert0(model_proc_num == model_num);
+
     av_assert0(s->backend_type == DNN_INTEL_IE);
 
     p.backend_type    = s->backend_type;
@@ -458,9 +557,10 @@ static av_cold int classify_init(AVFilterContext *ctx)
     p.input_is_image  = 1;
 
     for (i = 0; i < model_num; i++) {
+        void *proc;
         InferenceBaseContext *base = NULL;
 
-        p.model_file  = models[i];
+        p.model_file = models[i];
         ret = ff_inference_base_create(ctx, &base, &p);
         if (ret < 0) {
             av_log(ctx, AV_LOG_ERROR, "Could not create inference\n");
@@ -468,6 +568,33 @@ static av_cold int classify_init(AVFilterContext *ctx)
         }
 
         s->infer_bases[i] = base;
+
+        ff_load_default_model_proc(&s->model_preproc[i], &s->model_postproc[i]);
+
+        if (!models_proc[i])
+            continue;
+
+        proc = ff_read_model_proc(models_proc[i]);
+        if (!proc) {
+            av_log(ctx, AV_LOG_ERROR, "Could not read proc config file:"
+                    "%s\n", models_proc[i]);
+            ret = AVERROR(EIO);
+            goto fail;
+        }
+
+        if (ff_parse_input_preproc(proc, &s->model_preproc[i]) < 0) {
+            av_log(ctx, AV_LOG_ERROR, "Parse input preproc error.\n");
+            ret = AVERROR(EIO);
+            goto fail;
+        }
+
+        if (ff_parse_output_postproc(proc, &s->model_postproc[i]) < 0) {
+            av_log(ctx, AV_LOG_ERROR, "Parse output postproc error.\n");
+            ret = AVERROR(EIO);
+            goto fail;
+        }
+
+        s->proc_config[i] = proc;
     }
     s->loaded_num = model_num;
 
@@ -506,16 +633,14 @@ static av_cold int classify_init(AVFilterContext *ctx)
         s->label_bufs[i] = ref;
     }
 
-    for (i = 0; i < name_num; i++) {
+    for (i = 0; i < model_num; i++) {
         s->name_array[i] = names[i];
-        if (strstr(names[i], "emotion")) {
-            s->post_process[i] = &emotion_classify_result_process;
-        } else if (strstr(names[i], "age") && strstr(names[i], "gend")) {
-            s->post_process[i] = &age_gender_classify_result_process;
-        } else if (strstr(names[i], "face")) {
+        if (names[i] && strstr(names[i], "face")) {
             s->init[i]         = &face_identify_init;
             s->uninit[i]       = &face_identify_uninit;
             s->post_process[i] = &face_identify_result_process;
+        } else {
+            s->post_process[i] = &commmon_postprocess;
         }
 
         if (s->init[i] && s->init[i](ctx, i) < 0)
@@ -545,6 +670,8 @@ static av_cold void classify_uninit(AVFilterContext *ctx)
         ff_inference_base_free(&s->infer_bases[i]);
 
         av_buffer_unref(&s->label_bufs[i]);
+
+        ff_release_model_proc(s->proc_config[i], &s->model_preproc[i], &s->model_postproc[i]);
     }
 }
 
@@ -594,11 +721,14 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         for (j = 0; j < s->loaded_num; j++) {
             int output;
             InferenceBaseContext *base = s->infer_bases[j];
+            ModelInputPreproc *preproc = &s->model_preproc[j];
 
             VideoPP *vpp        = ff_inference_base_get_vpp(base);
             AVFrame *tmp        = vpp->frames[0];
             DNNModelInfo *iinfo = ff_inference_base_get_input_info(base);
             DNNModelInfo *oinfo = ff_inference_base_get_output_info(base);
+            int scale_width     = iinfo->dims[0][0];
+            int scale_height    = iinfo->dims[0][1];
 
             Rect crop_rect = (Rect) {
                 .x0 = bbox->x_min * in->width,
@@ -607,14 +737,21 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                 .y1 = bbox->y_max * in->height,
             };
 
+            // care interested object class only
+            if (preproc && preproc->object_class && bbox->label_buf) {
+                LabelsArray *array = (LabelsArray *)bbox->label_buf->data;
+                if (0 != strcmp(preproc->object_class, array->label[bbox->label_id]))
+                    continue;
+            }
+
             if (vpp->device == VPP_DEVICE_SW) {
                 ret = vpp->sw_vpp->crop_and_scale(in, &crop_rect,
-                        iinfo->width[0], iinfo->height[0],
+                        scale_width, scale_height,
                         vpp->expect_format, tmp->data, tmp->linesize);
             } else {
 #if CONFIG_VAAPI
                 ret = vpp->va_vpp->crop_and_scale(vpp->va_vpp, in, &crop_rect,
-                        iinfo->width[0], iinfo->height[0], tmp->data, tmp->linesize);
+                        scale_width, scale_height, tmp->data, tmp->linesize);
 #endif
             }
             if (ret != 0) {
@@ -626,7 +763,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
             ff_inference_base_submit_frame(base, tmp, 0, 0);
             ff_inference_base_infer(base);
 
-            for (output = 0; output < oinfo->numbers; output++) {
+            for (output = 0; output < oinfo->number; output++) {
                 InferTensorMeta tensor_meta = { };
                 ff_inference_base_get_infer_result(base, output, &tensor_meta);
 
@@ -672,8 +809,13 @@ static av_cold int config_input(AVFilterLink *inlink)
         DNNModelInfo         *info = ff_inference_base_get_input_info(base);
         VideoPP               *vpp = ff_inference_base_get_vpp(base);
 
+        int input_width  = info->dims[0][0];
+        int input_height = info->dims[0][1];
+
         // right now, no model needs multiple inputs
-        av_assert0(info->numbers == 1);
+        // av_assert0(info->number == 1);
+
+        ff_inference_dump_model_info(ctx, info);
 
         vpp->device = (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) ?
             VPP_DEVICE_HW : VPP_DEVICE_SW;
@@ -682,8 +824,8 @@ static av_cold int config_input(AVFilterLink *inlink)
         frame = av_frame_alloc();
         if (!frame)
             return AVERROR(ENOMEM);
-        frame->width   = info->width[0];
-        frame->height  = info->height[0];
+        frame->width   = input_width;
+        frame->height  = input_height;
         frame->format  = expect_format;
         vpp->frames[0] = frame;
 
@@ -706,7 +848,7 @@ static av_cold int config_input(AVFilterLink *inlink)
             }
 
             ret = va_vpp_surface_alloc(vpp->va_vpp,
-                    info->width[0], info->height[0], s->vpp_format);
+                    input_width, input_height, s->vpp_format);
             if (ret < 0) {
                 av_log(ctx, AV_LOG_ERROR, "Create va surface failed\n");
                 ret = AVERROR(EINVAL);
@@ -741,12 +883,39 @@ fail:
 
 static av_cold int config_output(AVFilterLink *outlink)
 {
+    int i;
+    AVFilterContext        *ctx = outlink->src;
+    InferenceClassifyContext *s = ctx->priv;
+
+    for (i = 0; i < s->loaded_num; i++) {
+        InferenceBaseContext *base = s->infer_bases[i];
+        DNNModelInfo *info = ff_inference_base_get_output_info(base);
+        ff_inference_dump_model_info(ctx, info);
+
+#if CONFIG_VAAPI
+        if (!outlink->hw_frames_ctx) {
+            VideoPP *vpp = ff_inference_base_get_vpp(base);
+            if (vpp->device == VPP_DEVICE_HW) {
+                if (!vpp->va_vpp || !vpp->va_vpp->hw_frames_ref) {
+                    av_log(ctx, AV_LOG_ERROR, "The input must have a hardware frame "
+                            "reference.\n");
+                    return AVERROR(EINVAL);
+                }
+                outlink->hw_frames_ctx = av_buffer_ref(vpp->va_vpp->hw_frames_ref);
+                if (!outlink->hw_frames_ctx)
+                    return AVERROR(ENOMEM);
+            }
+        }
+#endif
+    }
+
     return 0;
 }
 
 static const AVOption inference_classify_options[] = {
     { "dnn_backend",    "DNN backend for model execution", OFFSET(backend_type),    AV_OPT_TYPE_FLAGS,  { .i64 = DNN_INTEL_IE },          0, 2,    FLAGS, "engine" },
     { "model",          "path to model files for network", OFFSET(model_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
+    { "model_proc",     "model preproc and postproc",      OFFSET(model_proc),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
     { "label",          "labels for classify",             OFFSET(labels),          AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
     { "name",           "classify type names",             OFFSET(names),           AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },
     { "vpp_format",     "specify vpp output format",       OFFSET(vpp_format),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,    FLAGS },

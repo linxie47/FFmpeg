@@ -32,9 +32,14 @@
 
 #include "dnn_interface.h"
 
-typedef struct InferenceBaseContext InferenceBaseContext;
+typedef struct _InferenceBaseContext InferenceBaseContext;
+typedef struct _InputPreproc         ModelInputPreproc;
+typedef struct _OutputPostproc       OutputPostproc;
+typedef struct _ModelOutputPostproc  ModelOutputPostproc;
 
 typedef int (*InferencePreProcess)(InferenceBaseContext *base, int index, AVFrame *in, AVFrame **out);
+
+#define UNUSED(x) (void)(x)
 
 typedef struct InferenceParam {
     char  *model_file;
@@ -116,14 +121,36 @@ struct _SwVpp {
 typedef struct VideoPP {
     int       device;
     int       expect_format;
-    AVFrame  *frames[MAX_VPP_NUM];  //<! frames to save vpp output
+    AVFrame  *frames[MAX_VPP_NUM];  ///<! frames to save vpp output
     SwVpp    *sw_vpp;
 #if CONFIG_VAAPI
     VAAPIVpp *va_vpp;
 #endif
 } VideoPP;
 
-#define MAX_TENSOR_DIM_NUM 8
+struct _InputPreproc {
+    int   color_format;     ///<! input data format
+    char *layer_name;       ///<! layer name of input
+    char *object_class;     ///<! interested object class
+};
+
+struct _OutputPostproc {
+    char  *layer_name;
+    char  *converter;
+    char  *attribute_name;
+    char  *method;
+    double threshold;
+    double tensor2text_scale;
+    int    tensor2text_precision;
+    AVBufferRef *labels;
+};
+
+#define MAX_MODEL_OUTPUT 4
+struct _ModelOutputPostproc {
+    OutputPostproc procs[MAX_MODEL_OUTPUT];
+};
+
+#define MAX_TENSOR_DIM_NUM 4
 typedef struct InferTensorMeta {
     size_t  dim_size;
     size_t  dims[MAX_TENSOR_DIM_NUM];
@@ -207,6 +234,8 @@ DNNModelInfo* ff_inference_base_get_input_info(InferenceBaseContext *base);
 DNNModelInfo* ff_inference_base_get_output_info(InferenceBaseContext *base);
 VideoPP*      ff_inference_base_get_vpp(InferenceBaseContext *base);
 
+void ff_inference_dump_model_info(void *ctx, DNNModelInfo *info);
+
 #if CONFIG_VAAPI
 int va_vpp_device_create(VAAPIVpp *ctx, AVFilterLink *inlink);
 
@@ -215,6 +244,20 @@ int va_vpp_device_free(VAAPIVpp *ctx);
 int va_vpp_surface_alloc(VAAPIVpp *ctx, size_t width, size_t height, const char *format);
 
 int va_vpp_surface_release(VAAPIVpp *ctx);
+#endif
+
+int ff_get_file_size(FILE *fp);
+
+#if CONFIG_LIBCJSON
+void *ff_read_model_proc(const char *path);
+
+void ff_load_default_model_proc(ModelInputPreproc *preproc, ModelOutputPostproc *postproc);
+
+int ff_parse_input_preproc(const void *json, ModelInputPreproc *m_preproc);
+
+int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc);
+
+void ff_release_model_proc(const void *json, ModelInputPreproc *preproc, ModelOutputPostproc *postproc);
 #endif
 
 #endif

@@ -50,8 +50,8 @@ typedef struct InferenceDetectContext {
     InferenceBaseContext *base;
 
     char  *model_file;
-    char  *label_file;
     char  *vpp_format;
+    char  *model_proc;
     int    backend_type;
     int    device_type;
 
@@ -64,21 +64,11 @@ typedef struct InferenceDetectContext {
     int    input_precision;
     int    input_is_image;
 
-    char  *name;
+    void  *proc_config;
 
-    AVBufferRef *label_buf;
+    ModelInputPreproc   model_preproc;
+    ModelOutputPostproc model_postproc;
 } InferenceDetectContext;
-
-static void infer_labels_buffer_free(void *opaque, uint8_t *data)
-{
-    int i;
-    LabelsArray *labels = (LabelsArray *)data;
-
-    for (i = 0; i < labels->num; i++)
-        av_freep(&labels->label[i]);
-
-    av_free(data);
-}
 
 static void infer_detect_metadata_buffer_free(void *opaque, uint8_t *data)
 {
@@ -102,8 +92,8 @@ static int detect_postprocess(AVFilterContext *ctx, InferTensorMeta *meta, AVFra
 {
     int i;
     InferenceDetectContext *s = ctx->priv;
-    int object_size           = meta->dims[0];
-    int max_proposal_count    = meta->dims[1];
+    int object_size           = meta->dims[3];
+    int max_proposal_count    = meta->dims[2];
     const float *detection    = (float *)meta->data;
     AVBufferRef *ref;
     AVFrameSideData *sd;
@@ -136,11 +126,12 @@ static int detect_postprocess(AVFilterContext *ctx, InferTensorMeta *meta, AVFra
 
         if (new_bbox->confidence < s->threshold) {
             av_freep(&new_bbox);
-            break;
+            continue;
         }
 
-        if (s->label_buf)
-            new_bbox->label_buf = av_buffer_ref(s->label_buf);
+        // TODO: use layer name to get proc
+        if (s->model_postproc.procs[0].labels)
+            new_bbox->label_buf = av_buffer_ref(s->model_postproc.procs[0].labels);
 
         av_dynarray_add(&boxes->bbox, &boxes->num, new_bbox);
     }
@@ -217,7 +208,7 @@ static int query_formats(AVFilterContext *context)
 
 static int config_input(AVFilterLink *inlink)
 {
-    int i, ret;
+    int ret;
     AVFrame *frame;
     AVFilterContext      *ctx        = inlink->dst;
     InferenceDetectContext *s        = ctx->priv;
@@ -227,14 +218,12 @@ static int config_input(AVFilterLink *inlink)
     DNNModelInfo *info               = ff_inference_base_get_input_info(s->base);
     VideoPP *vpp                     = ff_inference_base_get_vpp(s->base);
 
-    for (i = 0; i < info->numbers; i++) {
-        av_log(ctx, AV_LOG_DEBUG, "Input info [%d] %d - %d %d %d - %d %d %d\n",
-               i, info->batch_size, info->width[i], info->height[i], info->channels[i],
-               info->is_image[i], info->precision[i], info->layout[i]);
-    }
+    int width = info->dims[0][0], height = info->dims[0][1];
+
+    ff_inference_dump_model_info(ctx, info);
 
     // right now, no model needs multiple inputs
-    av_assert0(info->numbers == 1);
+    av_assert0(info->number == 1);
 
     vpp->device = (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) ? VPP_DEVICE_HW : VPP_DEVICE_SW;
 
@@ -242,15 +231,15 @@ static int config_input(AVFilterLink *inlink)
     frame = av_frame_alloc();
     if (!frame)
         return AVERROR(ENOMEM);
-    frame->width   = info->width[0];
-    frame->height  = info->height[0];
+    frame->width   = width;
+    frame->height  = height;
     frame->format  = expect_format;
     vpp->frames[0] = frame;
 
     if (vpp->device == VPP_DEVICE_SW) {
-        int need_scale = expect_format   != inlink->format ||
-                         info->width[0]  != inlink->w      ||
-                         info->height[0] != inlink->h;
+        int need_scale = expect_format != inlink->format ||
+                         width         != inlink->w      ||
+                         height        != inlink->h;
 
         if (need_scale) {
             if (av_frame_get_buffer(frame, 0) < 0) {
@@ -260,7 +249,7 @@ static int config_input(AVFilterLink *inlink)
 
             vpp->sw_vpp->scale_contexts[0] = sws_getContext(
                     inlink->w, inlink->h, inlink->format,
-                    info->width[0], info->height[0], expect_format,
+                    width, height, expect_format,
                     SWS_BILINEAR, NULL, NULL, NULL);
 
             if (!vpp->sw_vpp->scale_contexts[0]) {
@@ -284,8 +273,7 @@ static int config_input(AVFilterLink *inlink)
             goto fail;
         }
 
-        ret = va_vpp_surface_alloc(vpp->va_vpp,
-                info->width[0], info->height[0], s->vpp_format);
+        ret = va_vpp_surface_alloc(vpp->va_vpp, width, height, s->vpp_format);
         if (ret < 0) {
             av_log(ctx, AV_LOG_ERROR, "Create va surface failed\n");
             ret = AVERROR(EINVAL);
@@ -316,12 +304,7 @@ static int config_output(AVFilterLink *outlink)
 
     DNNModelInfo *info = ff_inference_base_get_output_info(s->base);
 
-    for (int i = 0; i < info->numbers; i++) {
-        av_log(ctx, AV_LOG_DEBUG, "Output info [%d] %d - %d %d %d - %d %d %d\n",
-            i, info->batch_size,
-            info->width[i], info->height[i], info->channels[i],
-            info->is_image[i], info->precision[i], info->layout[i]);
-    }
+    ff_inference_dump_model_info(ctx, info);
 
 #if CONFIG_VAAPI
     if (vpp->device == VPP_DEVICE_HW) {
@@ -345,40 +328,31 @@ static av_cold int detect_init(AVFilterContext *ctx)
     InferenceDetectContext *s = ctx->priv;
     InferenceParam p = {};
 
-    av_assert0(s->model_file && s->name);
+    av_assert0(s->model_file);
 
     av_assert0(s->backend_type == DNN_INTEL_IE);
 
-    if (s->label_file) {
-        int n, labels_num;
-        AVBufferRef *ref    = NULL;
-        LabelsArray *larray = NULL;
-        char buffer[4096]   = { };
-        char *_labels[100]  = { };
+    ff_load_default_model_proc(&s->model_preproc, &s->model_postproc);
 
-        FILE *fp = fopen(s->label_file, "rb");
-        if (!fp) {
-            av_log(ctx, AV_LOG_ERROR, "Could not open file:%s\n", s->label_file);
+    if (s->model_proc) {
+        void *proc = ff_read_model_proc(s->model_proc);
+        if (!proc) {
+            av_log(ctx, AV_LOG_ERROR, "Could not read proc config file:"
+                    "%s\n", s->model_proc);
             return AVERROR(EIO);
         }
 
-        n = fread(buffer, sizeof(buffer), 1, fp);
-        fclose(fp);
-
-        av_split(buffer, ",", _labels, &labels_num, 100);
-
-        larray = av_mallocz(sizeof(*larray));
-        if (!larray)
-            return AVERROR(ENOMEM);
-
-        for (n = 0; n < labels_num; n++) {
-            char *l = av_strdup(_labels[n]);
-            av_dynarray_add(&larray->label, &larray->num, l);
+        if (ff_parse_input_preproc(proc, &s->model_preproc) < 0) {
+            av_log(ctx, AV_LOG_ERROR, "Parse input preproc error.\n");
+            return AVERROR(EIO);
         }
 
-        ref = av_buffer_create((uint8_t *)larray, sizeof(*larray),
-                               &infer_labels_buffer_free, NULL, 0);
-        s->label_buf = ref;
+        if (ff_parse_output_postproc(proc, &s->model_postproc) < 0) {
+            av_log(ctx, AV_LOG_ERROR, "Parse output postproc error.\n");
+            return AVERROR(EIO);
+        }
+
+        s->proc_config = proc;
     }
 
     p.model_file      = s->model_file;
@@ -405,7 +379,7 @@ static av_cold void detect_uninit(AVFilterContext *ctx)
 
     ff_inference_base_free(&s->base);
 
-    if (s->label_buf) av_buffer_unref(&s->label_buf);
+    ff_release_model_proc(s->proc_config, &s->model_preproc, &s->model_postproc);
 }
 
 static int filter_frame(AVFilterLink *inlink, AVFrame *in)
@@ -440,14 +414,13 @@ fail:
 static const AVOption inference_detect_options[] = {
     { "dnn_backend", "DNN backend for model execution", OFFSET(backend_type),    AV_OPT_TYPE_FLAGS,  { .i64 = DNN_INTEL_IE },          0, 2,  FLAGS, "engine" },
     { "model",       "path to model file for network",  OFFSET(model_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
+    { "model_proc",  "model preproc and postproc",      OFFSET(model_proc),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
     { "device",      "running on device type",          OFFSET(device_type),     AV_OPT_TYPE_FLAGS,  { .i64 = DNN_TARGET_DEVICE_CPU }, 0, 12, FLAGS },
-    { "label",       "label file path for detection",   OFFSET(label_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
     { "vpp_format",  "specify vpp output format",       OFFSET(vpp_format),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
     { "interval",    "detect every Nth frame",          OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1024, FLAGS},
     { "batch_size",  "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1024, FLAGS},
     { "threshold",   "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5}, 0, 1,    FLAGS},
 
-    { "name",        "detection type name",             OFFSET(name),            AV_OPT_TYPE_STRING, .flags = FLAGS, "detection" },
     { NULL }
 };
 

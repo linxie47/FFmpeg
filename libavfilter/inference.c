@@ -33,6 +33,10 @@
 
 #include "inference.h"
 
+#if CONFIG_LIBCJSON
+#include <cjson/cJSON.h>
+#endif
+
 #if CONFIG_VAAPI
 #define VA_CALL(_FUNC)                                     \
     {                                                      \
@@ -46,7 +50,7 @@
     }
 #endif
 
-struct InferenceBaseContext
+struct _InferenceBaseContext
 {
     char *infer_type;
     int   batch_size;
@@ -67,6 +71,50 @@ static int va_vpp_crop_and_scale(VAAPIVpp *va_vpp, AVFrame *input, Rect *crop_re
 
 static int va_vpp_scale(VAAPIVpp *va_vpp, AVFrame *input,
         int scale_w, int scale_h, uint8_t *data[],  int stride[]);
+
+static void infer_labels_buffer_free(void *opaque, uint8_t *data)
+{
+    int i;
+    LabelsArray *labels = (LabelsArray *)data;
+
+    for (i = 0; i < labels->num; i++)
+        av_freep(&labels->label[i]);
+
+    av_free(data);
+}
+
+// helper functions
+static void infer_labels_dump(uint8_t *data)
+{
+    int i;
+    LabelsArray *labels = (LabelsArray *)data;
+    printf("labels: ");
+    for (i = 0; i < labels->num; i++)
+        printf("%s ", labels->label[i]);
+    printf("\n");
+}
+
+int ff_get_file_size(FILE *fp)
+{
+    int file_size, current_pos;
+
+    if (!fp)
+        return -1;
+
+    current_pos = ftell(fp);
+
+    if (fseek(fp, 0, SEEK_END)) {
+        fprintf(stderr, "Couldn't seek to the end of feature file.\n");
+        return -1;
+    }
+
+    file_size = ftell(fp);
+
+    fseek(fp, current_pos, SEEK_SET);
+
+    return file_size;
+}
+
 
 static int fill_dnn_data_from_frame(DNNIOData *data,
                                     const AVFrame *frame,
@@ -314,7 +362,7 @@ int ff_inference_base_create(AVFilterContext *ctx,
     DNN_ERR_CHECK(ctx);
 
     info = &s->input_info;
-    for (i = 0; i < info->numbers; i++) {
+    for (i = 0; i < info->number; i++) {
         info->layout[i]    = param->input_layout;
         info->precision[i] = param->input_precision;
         info->is_image[i]  = param->input_is_image;
@@ -387,7 +435,6 @@ int ff_inference_base_submit_frame(InferenceBaseContext *base,
     DNNIOData input = { };
     fill_dnn_data_from_frame(&input, frame, batch_idx, 1, input_idx);
     base->model->set_input(base->model->model, &input);
-
 #if CONFIG_VAAPI
     if (base->vpp.va_vpp)
         va_vpp_surface_release(base->vpp.va_vpp);
@@ -410,7 +457,7 @@ int ff_inference_base_filter_frame(InferenceBaseContext *base, AVFrame *in)
     DNNReturnType dnn_ret;
     DNNIOData input = { };
 
-    for (int i = 0; i < info->numbers; i++) {
+    for (int i = 0; i < info->number; i++) {
         AVFrame *processed_frame;
         for (int j = 0; j < base->batch_size; j++) {
             if (base->preprocess) {
@@ -433,7 +480,7 @@ int ff_inference_base_filter_frame(InferenceBaseContext *base, AVFrame *in)
 }
 
 int ff_inference_base_get_infer_result(InferenceBaseContext *base,
-                                       int output_index,
+                                       int id,
                                        InferTensorMeta *metadata)
 {
     DNNModelInfo *info = &base->output_info;
@@ -443,18 +490,17 @@ int ff_inference_base_get_infer_result(InferenceBaseContext *base,
     av_assert0(metadata != NULL);
 
     // TODO: change to layer name for multiple outputs
-    data.in_out_idx = output_index;
+    data.in_out_idx = id;
 
     ret = base->model->get_execute_result(base->model->model, &data);
     av_assert0(ret == DNN_SUCCESS);
 
-    //TODO: refine by new interface
-    metadata->dim_size  = 3;
-    metadata->dims[0]   = info->width[0];
-    metadata->dims[1]   = info->height[0];
-    metadata->dims[2]   = info->channels[0];
-    metadata->layout    = info->layout[0];
-    metadata->precision = info->precision[0];
+    metadata->dim_size  = 4;
+    memcpy(&metadata->dims[0], &info->dims[id][0],
+            metadata->dim_size * sizeof(metadata->dims[0]));
+
+    metadata->layout    = info->layout[id];
+    metadata->precision = info->precision[id];
 
     metadata->data        = data.data[0];
     metadata->total_bytes = data.size;
@@ -477,11 +523,23 @@ VideoPP* ff_inference_base_get_vpp(InferenceBaseContext *base)
     return &base->vpp;
 }
 
-/********************************************
- *                                          *
- *              VAAPI VPP APIs              *
- *                                          *
- *******************************************/
+void ff_inference_dump_model_info(void *ctx, DNNModelInfo *info)
+{
+    int i;
+    for (i = 0; i < info->number; i++) {
+        size_t *p = &info->dims[i][0];
+        av_log(ctx, AV_LOG_DEBUG, "Info id:%d layer\"%-16s\" "
+               "batch size:%d - dim: %3lu %3lu %3lu %3lu - img:%d pre:%d layout:%d\n",
+               i, info->layer_name[i],
+               info->batch_size, p[0], p[1], p[2], p[3],
+               info->is_image[i], info->precision[i], info->layout[i]);
+    }
+}
+
+/*
+ * VAAPI VPP APIs
+ */
+
 #if CONFIG_VAAPI
 static int ff_vaapi_vpp_colour_standard(enum AVColorSpace av_cs)
 {
@@ -731,5 +789,215 @@ static int va_vpp_crop_and_scale(VAAPIVpp *va_vpp,
     }
 
     return VA_STATUS_SUCCESS;
+}
+#endif
+
+#if CONFIG_LIBCJSON
+/*
+ * model proc parsing functions using cJSON
+ */
+static inline void json_print(cJSON *j)
+{
+    char *string = cJSON_Print(j);
+    if (string)
+        printf("%s\n", string);
+}
+
+void *ff_read_model_proc(const char *path)
+{
+    int n, file_size;
+    cJSON *proc_config = NULL;
+    uint8_t *proc_json = NULL;
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        fprintf(stderr, "File open error:%s\n", path);
+        return NULL;
+    }
+
+    file_size = ff_get_file_size(fp);
+
+    proc_json = av_mallocz(file_size);
+    if (!proc_json)
+        goto end;
+
+    n = fread(proc_json, file_size, 1, fp);
+
+    UNUSED(n);
+
+    proc_config = cJSON_Parse(proc_json);
+    if (proc_config == NULL) {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr != NULL)
+            fprintf(stderr, "Error before: %s\n", error_ptr);
+        goto end;
+    }
+
+end:
+    if (proc_json)
+        av_freep(&proc_json);
+    fclose(fp);
+    return proc_config;
+}
+
+void ff_load_default_model_proc(ModelInputPreproc *preproc, ModelOutputPostproc *postproc)
+{
+    if (preproc) {
+        /*
+         * format is a little tricky, an ideal input format for IE is BGR planer
+         * however, neither soft csc nor hardware vpp could support that format.
+         * Here, we set a close soft format. The actual one coverted before sent
+         * to IE will be decided by user config and hardware vpp used or not.
+         */
+        preproc->color_format = AV_PIX_FMT_BGR24;
+        preproc->layer_name   = NULL;
+    }
+
+    if (postproc) {
+        // do nothing
+    }
+}
+
+int ff_parse_input_preproc(const void *json, ModelInputPreproc *m_preproc)
+{
+    cJSON *item, *preproc, *color, *layer, *object_class;
+
+    preproc = cJSON_GetObjectItem(json, "input_preproc");
+    if (preproc == NULL) {
+        av_log(NULL, AV_LOG_DEBUG, "No input_preproc.\n");
+        return 0;
+    }
+
+    // not support multiple inputs yet
+    av_assert0(cJSON_GetArraySize(preproc) <= 1);
+
+    cJSON_ArrayForEach(item, preproc)
+    {
+        color = cJSON_GetObjectItemCaseSensitive(item, "color_format");
+        layer = cJSON_GetObjectItemCaseSensitive(item, "layer_name");
+        object_class = cJSON_GetObjectItemCaseSensitive(item, "object_class");
+    }
+
+    if (color) {
+        if (!cJSON_IsString(color) || (color->valuestring == NULL))
+            return -1;
+
+        av_log(NULL, AV_LOG_INFO, "Color Format:\"%s\"\n", color->valuestring);
+
+        if (!strcmp(color->valuestring, "BGR"))
+            m_preproc->color_format = AV_PIX_FMT_BGR24;
+        else if (!strcmp(color->valuestring, "RGB"))
+            m_preproc->color_format = AV_PIX_FMT_RGB24;
+        else
+            return -1;
+    }
+
+    if (object_class) {
+        if (!cJSON_IsString(object_class) || (object_class->valuestring == NULL))
+            return -1;
+
+        av_log(NULL, AV_LOG_INFO, "Object_class:\"%s\"\n", object_class->valuestring);
+
+        m_preproc->object_class = object_class->valuestring;
+    }
+
+    UNUSED(layer);
+
+    return 0;
+}
+
+// For detection, we now care labels only.
+// Layer name and type can be got from output blob.
+int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
+{
+    size_t index = 0;
+    cJSON *item, *postproc;
+    cJSON *attribute, *converter, *labels, *layer, *method, *threshold;
+    cJSON *tensor2text_scale, *tensor2text_precision;
+
+    postproc = cJSON_GetObjectItem(json, "output_postproc");
+    if (postproc == NULL) {
+        av_log(NULL, AV_LOG_DEBUG, "No output_postproc.\n");
+        return 0;
+    }
+
+    av_assert0(cJSON_GetArraySize(postproc) <= MAX_MODEL_OUTPUT);
+    cJSON_ArrayForEach(item, postproc)
+    {
+        OutputPostproc *proc = &m_postproc->procs[index];
+
+#define FETCH_STRING(var, name)                                  \
+        do { var = cJSON_GetObjectItemCaseSensitive(item, #name);\
+            if (var) proc->name = var->valuestring;              \
+        } while(0)
+#define FETCH_DOUBLE(var, name)                                  \
+        do { var = cJSON_GetObjectItemCaseSensitive(item, #name);\
+            if (var) proc->name = var->valuedouble;              \
+        } while(0)
+#define FETCH_INTEGER(var, name)                                 \
+        do { var = cJSON_GetObjectItemCaseSensitive(item, #name);\
+            if (var) proc->name = var->valueint;                 \
+        } while(0)
+
+        FETCH_STRING(layer, layer_name);
+        FETCH_STRING(method, method);
+        FETCH_STRING(attribute, attribute_name);
+        FETCH_STRING(converter, converter);
+
+        FETCH_DOUBLE(threshold, threshold);
+        FETCH_DOUBLE(tensor2text_scale, tensor2text_scale);
+
+        FETCH_INTEGER(tensor2text_precision, tensor2text_precision);
+
+        // handle labels
+        labels = cJSON_GetObjectItemCaseSensitive(item, "labels");
+        if (labels) {
+            cJSON *label;
+            size_t labels_num = cJSON_GetArraySize(labels);
+
+            if (labels_num > 0) {
+                AVBufferRef *ref    = NULL;
+                LabelsArray *larray = av_mallocz(sizeof(*larray));
+
+                if (!larray)
+                    return AVERROR(ENOMEM);
+
+                cJSON_ArrayForEach(label, labels) {
+                    char *l = av_strdup(label->valuestring);
+                    av_dynarray_add(&larray->label, &larray->num, l);
+                }
+
+                ref = av_buffer_create((uint8_t *)larray, sizeof(*larray),
+                        &infer_labels_buffer_free, NULL, 0);
+
+                proc->labels = ref;
+
+                infer_labels_dump(ref->data);
+            }
+        }
+
+        index++;
+    }
+#undef FETCH_STRING
+#undef FETCH_DOUBLE
+#undef FETCH_INTEGER
+
+    return 0;
+}
+
+void ff_release_model_proc(const void *json,
+        ModelInputPreproc *preproc, ModelOutputPostproc *postproc)
+{
+    size_t index = 0;
+
+    if (!json) return;
+
+    if (postproc) {
+        for (index = 0; index < MAX_MODEL_OUTPUT; index++) {
+            if (postproc->procs[index].labels)
+                av_buffer_unref(&postproc->procs[index].labels);
+        }
+    }
+
+    cJSON_Delete((cJSON *)json);
 }
 #endif

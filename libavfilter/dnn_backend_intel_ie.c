@@ -241,19 +241,20 @@ static DNNReturnType get_input_info_intel_ie(void *model, DNNModelInfo *info)
 
     IEGetModelInputInfo(ie_model->context, ie_model->input_infos);
 
-    if (ie_model->input_infos->numbers > DNN_INPUT_OUTPUT_NUM)
+    if (ie_model->input_infos->number > DNN_INPUT_OUTPUT_NUM)
         return DNN_ERROR;
 
-    for (id = 0; id < ie_model->input_infos->numbers; id++) {
-        info->width[id]     = ie_model->input_infos->width[id];
-        info->height[id]    = ie_model->input_infos->height[id];
-        info->channels[id]  = ie_model->input_infos->channels[id];
-        info->precision[id] = get_dnn_precision(ie_model->input_infos->precision[id]);
-        info->layout[id]    = get_dnn_layout(ie_model->input_infos->layout[id]);
-        info->is_image[id]  = 0;
+    for (id = 0; id < ie_model->input_infos->number; id++) {
+        memcpy(&info->dims[id][0],
+               &ie_model->input_infos->tensorMeta[id].dims[0],
+               4 * sizeof(info->dims[id][0]));
+
+        info->layer_name[id] = ie_model->input_infos->tensorMeta[id].layer_name;
+        info->precision[id]  = get_dnn_precision(ie_model->input_infos->tensorMeta[id].precision);
+        info->layout[id]     = get_dnn_layout(ie_model->input_infos->tensorMeta[id].layout);
     }
     info->batch_size = ie_model->input_infos->batch_size;
-    info->numbers    = ie_model->input_infos->numbers;
+    info->number     = ie_model->input_infos->number;
 
     return DNN_SUCCESS;
 }
@@ -263,15 +264,15 @@ static DNNReturnType set_input_info_intel_ie(void *model, DNNModelInfo *info)
     int id = 0;
     DNNIntelIEModel *ie_model = (DNNIntelIEModel *)model;
 
-    if (!model || !info || info->numbers > DNN_INPUT_OUTPUT_NUM)
+    if (!model || !info || info->number > DNN_INPUT_OUTPUT_NUM)
         return DNN_ERROR;
 
-    for (id = 0; id < info->numbers; id++) {
-        ie_model->input_infos->precision[id] = get_precision(info->precision[id]);
-        ie_model->input_infos->layout[id]    = get_layout(info->layout[id]);
-        ie_model->input_infos->dataType[id]  = info->is_image[id];
-    }
-    ie_model->input_infos->numbers = info->numbers;
+    // image set to input 0
+    ie_model->input_infos->tensorMeta[0].precision = get_precision(info->precision[id]);
+    ie_model->input_infos->tensorMeta[0].layout    = get_layout(info->layout[id]);
+    ie_model->input_infos->tensorMeta[0].dataType  = info->is_image[id];
+
+    ie_model->input_infos->number = info->number;
 
     IESetModelInputInfo(ie_model->context, ie_model->input_infos);
 
@@ -288,42 +289,20 @@ static DNNReturnType get_output_info_intel_ie(void *model, DNNModelInfo *info)
 
     IEGetModelOutputInfo(ie_model->context, ie_model->output_infos);
 
-    if (ie_model->output_infos->numbers > DNN_INPUT_OUTPUT_NUM)
+    if (ie_model->output_infos->number > DNN_INPUT_OUTPUT_NUM)
         return DNN_ERROR;
 
-    for (id = 0; id < ie_model->output_infos->numbers; id++) {
-        info->width[id]     = ie_model->output_infos->width[id];
-        info->height[id]    = ie_model->output_infos->height[id];
-        info->channels[id]  = ie_model->output_infos->channels[id];
-        info->precision[id] = get_dnn_precision(ie_model->output_infos->precision[id]);
-        info->layout[id]    = get_dnn_layout(ie_model->output_infos->layout[id]);
-        info->is_image[id]  = 0;
+    for (id = 0; id < ie_model->output_infos->number; id++) {
+        memcpy(&info->dims[id][0],
+               &ie_model->output_infos->tensorMeta[id].dims[0],
+               4 * sizeof(info->dims[id][0]));
+
+        info->layer_name[id] = ie_model->output_infos->tensorMeta[id].layer_name;
+        info->precision[id]  = get_dnn_precision(ie_model->output_infos->tensorMeta[id].precision);
+        info->layout[id]     = get_dnn_layout(ie_model->output_infos->tensorMeta[id].layout);
     }
     info->batch_size = ie_model->output_infos->batch_size;
-    info->numbers    = ie_model->output_infos->numbers;
-
-    return DNN_SUCCESS;
-}
-
-static DNNReturnType set_output_info_intel_ie(void *model, DNNModelInfo *info)
-{
-    int id = 0;
-    DNNIntelIEModel *ie_model = (DNNIntelIEModel *)model;
-
-    if (!model || !info)
-        return DNN_ERROR;
-
-    if (info->numbers > DNN_INPUT_OUTPUT_NUM)
-        return DNN_ERROR;
-
-    for (id = 0; id < info->numbers; id++) {
-        ie_model->output_infos->precision[id] = get_precision(info->precision[id]);
-        ie_model->output_infos->layout[id]    = get_layout(info->layout[id]);
-        ie_model->output_infos->dataType[id]  = info->is_image[id];
-    }
-    ie_model->output_infos->numbers = info->numbers;
-
-    IESetModelOutputInfo(ie_model->context, ie_model->output_infos);
+    info->number     = ie_model->output_infos->number;
 
     return DNN_SUCCESS;
 }
@@ -407,7 +386,6 @@ DNNModel* ff_dnn_load_model_intel_ie(void *config)
     model->get_input_info     = &get_input_info_intel_ie;
     model->set_input_info     = &set_input_info_intel_ie;
     model->get_output_info    = &get_output_info_intel_ie;
-    model->set_output_info    = &set_output_info_intel_ie;
     model->create_model       = &create_model_intel_ie;
 
     return model;

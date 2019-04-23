@@ -21,6 +21,7 @@
 #define AVFILTER_DNN_DATA_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 /**
 * @enum TargetDevice
@@ -136,17 +137,18 @@ typedef struct DNNIOData {
 * @struct model input info
 * @brief model input info
 */
-#define DNN_INPUT_OUTPUT_NUM 10
+#define DNN_INPUT_OUTPUT_NUM 8
 typedef struct DNNModelInfo {
-    unsigned int width[DNN_INPUT_OUTPUT_NUM];
-    unsigned int height[DNN_INPUT_OUTPUT_NUM];
-    unsigned int channels[DNN_INPUT_OUTPUT_NUM];
+    char  *layer_name[DNN_INPUT_OUTPUT_NUM];
+    size_t       dims[DNN_INPUT_OUTPUT_NUM][4];
+
     DNNDataPrecisionType precision[DNN_INPUT_OUTPUT_NUM];
     DNNDataLayoutType layout[DNN_INPUT_OUTPUT_NUM];
+
     // 0 non-image; 1 image.
     unsigned int is_image[DNN_INPUT_OUTPUT_NUM];
     unsigned int batch_size;
-    unsigned int numbers;
+    unsigned int number;
 } DNNModelInfo;
 
 /**
