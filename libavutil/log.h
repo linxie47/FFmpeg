@@ -297,6 +297,9 @@ void av_log_set_callback(void (*callback)(void*, int, const char*, va_list));
 void av_log_default_callback(void *avcl, int level, const char *fmt,
                              va_list vl);
 
+int av_profiling_get(void);
+void av_profiling_set(int arg);
+
 /**
  * Return the context name
  *

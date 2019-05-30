@@ -151,6 +151,7 @@ int        nb_input_files   = 0;
 
 OutputStream **output_streams = NULL;
 int         nb_output_streams = 0;
+int         total_frames_num = 0;
 OutputFile   **output_files   = NULL;
 int         nb_output_files   = 0;
 
@@ -1659,6 +1660,7 @@ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_ti
     double speed;
     int64_t pts = INT64_MIN + 1;
     static int64_t last_time = -1;
+    static int64_t init_time = 0;
     static int qp_histogram[52];
     int hours, mins, secs, us;
     const char *hours_sign;
@@ -1680,6 +1682,18 @@ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_ti
 
     t = (cur_time-timer_start) / 1000000.0;
 
+    if (init_time == 0 && do_profiling_all) {
+        for (i = 0; i < nb_filtergraphs; i++) {
+            FilterGraph *fg = filtergraphs[i];
+            int j;
+            for (j = 0; j < fg->graph->nb_filters; j++) {
+                AVFilterContext *ft = fg->graph->filters[j];
+                if (!ft)
+                    continue;
+                init_time += ft->init_working_time;
+            }
+        }
+    }
 
     oc = output_files[0]->ctx;
 
@@ -1702,7 +1716,7 @@ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_ti
             av_bprintf(&buf_script, "stream_%d_%d_q=%.1f\n",
                        ost->file_index, ost->index, q);
         }
-        if (!vid && enc->codec_type == AVMEDIA_TYPE_VIDEO) {
+        if (!vid && enc->codec_type == AVMEDIA_TYPE_VIDEO && !do_profiling_all) {
             float fps;
 
             frame_number = ost->frame_number;
@@ -1761,6 +1775,19 @@ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_ti
                                           ost->st->time_base, AV_TIME_BASE_Q));
         if (is_last_report)
             nb_frames_drop += ost->last_dropped;
+    }
+    if (do_profiling_all) {
+        total_frames_num = 0;
+        for (i = 0; i < nb_output_streams; i++) {
+            ost = output_streams[i];
+            total_frames_num += ost->frame_number;
+        }
+        float total_fps;
+        total_fps = t > 1 ? total_frames_num / t : 0;
+        av_bprintf(&buf, "| profiling | total frame=%d ", total_frames_num);
+        av_bprintf(&buf, "fps=%.2f |", total_fps);
+        total_fps = t > 1 ? total_frames_num / (t - init_time / 1000000.0 ): 0;
+        av_bprintf(&buf, ", fps without filter init=%.2f |", total_fps);
     }
 
     secs = FFABS(pts) / AV_TIME_BASE;
@@ -4736,6 +4763,13 @@ static int transcode(void)
     for (i = 0; i < nb_output_streams; i++) {
         ost = output_streams[i];
         if (ost->encoding_needed) {
+            if (do_profiling_all) {
+                if (ost->enc_ctx->frame_number > 1 && ost->enc_ctx->sum_working_time > 1) {
+                    double fps = (double)(ost->enc_ctx->frame_number * 1000000) / ost->enc_ctx->sum_working_time;
+                    printf("| encode profiling | name=%s, frame=%d, fps=%.2f\n",
+                        ost->enc_ctx->codec->name, ost->enc_ctx->frame_number, fps);
+                }
+            }
             av_freep(&ost->enc_ctx->stats_in);
         }
         total_packets_written += ost->packets_written;
@@ -4750,9 +4784,44 @@ static int transcode(void)
     for (i = 0; i < nb_input_streams; i++) {
         ist = input_streams[i];
         if (ist->decoding_needed) {
+            if (do_profiling_all && !ist->dec_ctx->hwaccel) {
+                if (ist->dec_ctx->frame_number > 1 && ist->dec_ctx->sum_working_time > 1) {
+                    double fps = (double)(ist->dec_ctx->frame_number * 1000000) / ist->dec_ctx->sum_working_time;
+                    printf("| sw decode profiling | name=%s, frame=%d, fps=%.2f\n",
+                        ist->dec_ctx->codec->name, ist->dec_ctx->frame_number, fps);
+                }
+            }
             avcodec_close(ist->dec_ctx);
             if (ist->hwaccel_uninit)
                 ist->hwaccel_uninit(ist->dec_ctx);
+        }
+    }
+
+    if (do_profiling_all) { //for filters
+        for (i = 0; i < nb_filtergraphs; i++) {
+            FilterGraph *fg = filtergraphs[i];
+            int j;
+            for (j = 0; j < fg->graph->nb_filters; j++) {
+                AVFilterContext *ft = fg->graph->filters[j];
+                int64_t frame_cnt = 0;
+                int k;
+
+                if (!ft)
+                    continue;
+                for (k = 0; k < ft->nb_outputs; k++) {
+                    if (ft->outputs[k])
+                        frame_cnt += ft->outputs[k]->frame_count_out;
+                }
+                if (frame_cnt == 0)
+                    continue;
+                if (ft->sum_working_time > 1) {
+                    double fps = (double)(frame_cnt * 1000000) / ft->sum_working_time;
+                    if (fps < 10000) { //some filter delivered too big fps is not we focused
+                        printf("| filter profiling | name=%s, init=%.2f ms, frame=%d, fps=%.2f\n",
+                                ft->filter->name, (double)ft->init_working_time / 1000, frame_cnt, fps);
+                    }
+                }
+            }
         }
     }
 

@@ -422,6 +422,8 @@ struct AVFilterContext {
      * configured.
      */
     int extra_hw_frames;
+
+    int64_t last_tm, init_working_time, sum_working_time;
 };
 
 /**

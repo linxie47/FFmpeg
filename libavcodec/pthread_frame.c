@@ -44,6 +44,7 @@
 #include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/thread.h"
+#include "libavutil/time.h"
 
 enum {
     ///< Set when the thread is awaiting a packet.
@@ -198,7 +199,11 @@ static attribute_align_arg void *frame_worker_thread(void *arg)
 
         av_frame_unref(p->frame);
         p->got_frame = 0;
+        if (av_profiling_get())
+            avctx->last_tm = av_gettime();
         p->result = codec->decode(avctx, p->frame, &p->got_frame, &p->avpkt);
+        if (av_profiling_get() && !avctx->hwaccel)
+            avctx->sum_working_time += av_gettime() - avctx->last_tm;
 
         if ((p->result < 0 || !p->got_frame) && p->frame->buf[0]) {
             if (avctx->internal->allocate_progress)
@@ -283,6 +288,10 @@ static int update_context_from_thread(AVCodecContext *dst, AVCodecContext *src, 
         dst->sample_fmt     = src->sample_fmt;
         dst->channel_layout = src->channel_layout;
         dst->internal->hwaccel_priv_data = src->internal->hwaccel_priv_data;
+        if (av_profiling_get()) {
+            dst->last_tm = src->last_tm;
+            dst->sum_working_time = src->sum_working_time;
+        }
 
         if (!!dst->hw_frames_ctx != !!src->hw_frames_ctx ||
             (dst->hw_frames_ctx && dst->hw_frames_ctx->data != src->hw_frames_ctx->data)) {
@@ -340,6 +349,10 @@ static int update_context_from_user(AVCodecContext *dst, AVCodecContext *src)
     dst->frame_number     = src->frame_number;
     dst->reordered_opaque = src->reordered_opaque;
     dst->thread_safe_callbacks = src->thread_safe_callbacks;
+    if (av_profiling_get()) {
+        dst->last_tm = src->last_tm;
+        dst->sum_working_time = src->sum_working_time;
+    }
 
     if (src->slice_count && src->slice_offset) {
         if (dst->slice_count < src->slice_count) {

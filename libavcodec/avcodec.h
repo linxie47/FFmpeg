@@ -3313,6 +3313,8 @@ typedef struct AVCodecContext {
      * used as reference pictures).
      */
     int extra_hw_frames;
+
+    unsigned long long int last_tm, sum_working_time;
 } AVCodecContext;
 
 #if FF_API_CODEC_GET_SET
