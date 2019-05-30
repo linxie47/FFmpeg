@@ -61,8 +61,8 @@ static int kafka_open(URLContext *s, const char *uri, int flags, AVDictionary **
     topic = strrchr(s->filename, '/') + 1;
 
     kc->conf = rd_kafka_conf_new();
-    port ? sprintf(brokers, "%s:%d", hostname, port)
-        : sprintf(brokers, "%s:9092", hostname);
+    port ? snprintf(brokers, 256, "%s:%d", hostname, port)
+        : snprintf(brokers, 256, "%s:9092", hostname);
 
     /* Set bootstrap broker(s) as a comma-separated list of
      * host or host:port (default port 9092).

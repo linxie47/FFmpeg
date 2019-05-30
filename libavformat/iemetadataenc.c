@@ -31,9 +31,9 @@
 #define JSON_TAIL "},\n"
 #define JSON_ESCAPE "    "
 #define JSON_ARRAY_TAIL "]\n"
-#define JSON_FVALUE(str, name, value) sprintf(str, "\"%s\": %.1f,\n", name, value)
-#define JSON_IVALUE(str, name, value) sprintf(str, "\"%s\": %d,\n", name, value)
-#define JSON_LIVALUE(str, name, value) sprintf(str, "\"%s\": %ld,\n", name, value)
+#define JSON_FVALUE(str, name, value) snprintf(str, TMP_STR_BUF_SIZE, "\"%s\": %.1f,\n", name, value)
+#define JSON_IVALUE(str, name, value) snprintf(str, TMP_STR_BUF_SIZE, "\"%s\": %d,\n", name, value)
+#define JSON_LIVALUE(str, name, value) snprintf(str,TMP_STR_BUF_SIZE, "\"%s\": %lu,\n", name, value)
 #define JSON_STRING(str, name, value) snprintf(str, TMP_STR_BUF_SIZE, "\"%s\": \"%s\",\n", name, value)
 
 #define BUFFER_SIZE (1024 * 1024)
@@ -53,10 +53,12 @@ typedef struct IeMetaDataMuxer {
 static int fill_content(AVFormatContext *s, const char *str, int flush)
 {
     IeMetaDataMuxer *md = s->priv_data;
-    unsigned int len = strlen(str);
+    unsigned int len;
 
     if (!str)
         return 0;
+
+    len = strlen(str);
     if (str[len] == '\0')
         len++;
     if (((len + md->meta_data_length) > BUFFER_SIZE)) {
@@ -97,6 +99,7 @@ static int pack(AVFormatContext *s, const char *org, ...)
     const char *p = org;
     char *name, *str;
     int ipara;
+    int64_t lipara;
     float fpara;
     IeMetaDataMuxer *md = s->priv_data;
     len = strlen(org);
@@ -139,9 +142,12 @@ static int pack(AVFormatContext *s, const char *org, ...)
             case 'f': //float value
             case 's': //str value
                 name = va_arg(argp, char*);
-                if (p[i] == 'i' || p[i] == 'I') {
+                if (p[i] == 'i') {
                     ipara = va_arg(argp, int);
-                    p[i] == 'i' ? JSON_IVALUE(tmp_str, name, ipara) : JSON_LIVALUE(tmp_str, name, ipara);
+                    JSON_IVALUE(tmp_str, name, ipara);
+                } else if (p[i] == 'I') {
+                    lipara = va_arg(argp, int64_t);
+                    JSON_LIVALUE(tmp_str, name, lipara);
                 } else if (p[i] == 'f') {
                     fpara = va_arg(argp, double);
                     JSON_FVALUE(tmp_str, name, fpara);
@@ -220,9 +226,14 @@ static int jhead_write(AVFormatContext *s, AVFrame *frm_data)
 {
     char tmp_str[TMP_STR_BUF_SIZE];
     IeMetaDataMuxer *md = s->priv_data;
-    long nano_ts = s->streams[0] ?
-        av_q2d(s->streams[0]->time_base) * frm_data->pts * 1000000000 :
-        -1;
+    int64_t nano_ts = 1000000000;
+
+    if (s->streams[0])
+        nano_ts = frm_data->pts * (nano_ts * s->streams[0]->time_base.num / s->streams[0]->time_base.den);
+    else
+        nano_ts = -1;
+
+    memset(tmp_str, 0, TMP_STR_BUF_SIZE);
 
     if (md->output_type == 1 && md->id_number != 0) {
         pack(s, ",");
@@ -236,23 +247,25 @@ static int jhead_write(AVFormatContext *s, AVFrame *frm_data)
                 tmp_str);
     else {
         char id[80];
-        sprintf(id, "id-%d", md->id_number++);
+        snprintf(id, 80, "id-%d", md->id_number++);
         pack(s, "(IsS", id, "timestamp", nano_ts,
                 "source", md->source,
                 tmp_str);
     }
 
     if (!md->tag)
-        sprintf(tmp_str, "\"tags\":{\"custom_key\":\"custom_value\"},\n");
+        snprintf(tmp_str, TMP_STR_BUF_SIZE, "\"tags\":{\"custom_key\":\"custom_value\"},\n");
     else {
         char *token, *save_ptr, *tag_str;
         int offset;
         char key[128] = "";
         char tags[256];
         float value = 0.0;
+        int len = (strlen(md->tag) < 255) ? strlen(md->tag) : 255;
 
-        memcpy(tags, md->tag, strlen(md->tag));
-        offset = sprintf(tmp_str, "\"tags\":{");
+        memset(tags, 0, 256);
+        memcpy(tags, md->tag, len);
+        offset = snprintf(tmp_str, TMP_STR_BUF_SIZE, "\"tags\":{");
         for (tag_str = tags; ; tag_str = NULL) {
             token = strtok_r(tag_str, ",", &save_ptr);
             if (token == NULL)
@@ -260,7 +273,7 @@ static int jhead_write(AVFormatContext *s, AVFrame *frm_data)
             sscanf(token, "%127[^:]:%f", key, &value);
             offset += snprintf(tmp_str + offset, TMP_STR_BUF_SIZE - offset, "\"%s\":%1.3f,", key, value);
         }
-        sprintf(tmp_str + offset - 2, "},\n");
+        snprintf(tmp_str + offset - 2, TMP_STR_BUF_SIZE - offset + 2, "},\n");
     }
     pack(s, "S[", tmp_str, "objects");
 
@@ -310,7 +323,7 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
 
                 for (i = 0; i < bboxes->num; i++) {
                     if (!bboxes->bbox[i]->label_buf) {
-                        sprintf(tmp_str, "%s", "face");
+                        snprintf(tmp_str, TMP_STR_BUF_SIZE, "%s", "face");
                     } else {
                         int label_id = bboxes->bbox[i]->label_id;
                         LabelsArray *array = (LabelsArray*)(bboxes->bbox[i]->label_buf->data);

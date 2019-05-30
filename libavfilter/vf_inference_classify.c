@@ -182,8 +182,10 @@ static int attributes_to_text(AVFilterContext *ctx,
         classify->confidence = confidence;
         classify->label_buf  = av_buffer_ref(proc->labels);
 
-        dump_softmax(ctx, classify->name, classify->label_id,
-                     classify->confidence,classify->label_buf);
+        if (classify->label_buf) {
+            dump_softmax(ctx, classify->name, classify->label_id,
+                         classify->confidence,classify->label_buf);
+        }
     } else if (method_compound) {
         int i;
         double threshold  = 0.5;
@@ -677,7 +679,7 @@ static av_cold void classify_uninit(AVFilterContext *ctx)
 
 static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 {
-    int i, ret;
+    int i, ret = 0;
     AVFilterContext *ctx        = inlink->dst;
     InferenceClassifyContext *s = ctx->priv;
     AVFilterLink *outlink       = inlink->dst->outputs[0];
@@ -685,8 +687,8 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     AVFrameSideData         *sd, *new_sd;
     BBoxesArray             *boxes;
     InferDetectionMeta      *d_meta;
-    ClassifyArray           *c_array;
-    InferClassificationMeta *c_meta;
+    ClassifyArray           *c_array = NULL;
+    InferClassificationMeta *c_meta  = NULL;
 
     if (s->frame_number % s->every_nth_frame != 0)
         goto done;
@@ -697,7 +699,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     d_meta = (InferDetectionMeta *)sd->data;
     if (!d_meta)
-        goto fail;
+        goto done;
 
     boxes = d_meta->bboxes;
     if (!boxes || !boxes->num)
@@ -790,6 +792,10 @@ done:
     s->frame_number++;
     return ff_filter_frame(outlink, in);
 fail:
+    if (c_array)
+        av_freep(&c_array);
+    if (c_meta)
+        av_freep(&c_meta);
     av_frame_free(&in);
     return ret;
 }
@@ -803,6 +809,9 @@ static av_cold int config_input(AVFilterLink *inlink)
     InferenceClassifyContext      *s = ctx->priv;
     enum AVPixelFormat expect_format = AV_PIX_FMT_BGR24;
     const AVPixFmtDescriptor   *desc = av_pix_fmt_desc_get(inlink->format);
+
+    if (!desc)
+        return AVERROR(EINVAL);
 
     for (i = 0; i < s->loaded_num; i++) {
         InferenceBaseContext *base = s->infer_bases[i];
@@ -830,7 +839,8 @@ static av_cold int config_input(AVFilterLink *inlink)
         vpp->frames[0] = frame;
 
         if (vpp->device == VPP_DEVICE_SW) {
-            if (ret = av_frame_get_buffer(frame, 0) < 0)
+            ret = av_frame_get_buffer(frame, 0);
+            if (ret < 0)
                 goto fail;
         } else {
 #if CONFIG_VAAPI

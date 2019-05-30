@@ -104,8 +104,10 @@ static int detect_postprocess(AVFilterContext *ctx, InferTensorMeta *meta, AVFra
         return AVERROR(ENOMEM);
 
     detect_meta = av_malloc(sizeof(*detect_meta));
-    if (!detect_meta)
+    if (!detect_meta) {
+        av_free(boxes);
         return AVERROR(ENOMEM);
+    }
 
     // FIXME: output object size standard??
     av_assert0(object_size == 7);
@@ -116,6 +118,10 @@ static int detect_postprocess(AVFilterContext *ctx, InferTensorMeta *meta, AVFra
 
     for (i = 0; i < max_proposal_count; i++) {
         InferDetection *new_bbox = av_mallocz(sizeof(*new_bbox));
+        if (!new_bbox) {
+            av_log(ctx, AV_LOG_ERROR, "Could not alloc bbox!\n");
+            break;
+        }
 
         new_bbox->label_id   = (int)detection[i * object_size + 1];
         new_bbox->confidence = detection[i * object_size + 2];
@@ -144,18 +150,20 @@ static int detect_postprocess(AVFilterContext *ctx, InferTensorMeta *meta, AVFra
                p->label_id, p->confidence,p->x_min, p->y_min, p->x_max, p->y_max);
     }
 
+    detect_meta->bboxes = boxes;
+
     ref = av_buffer_create((uint8_t *)detect_meta, sizeof(*detect_meta),
                            &infer_detect_metadata_buffer_free, NULL, 0);
-    if (!ref)
+    if (!ref) {
+        infer_detect_metadata_buffer_free(NULL, (uint8_t *)detect_meta);
         return AVERROR(ENOMEM);
-
-    detect_meta->bboxes = boxes;
+    }
 
     // add meta data to side data
     sd = av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_INFERENCE_DETECTION, ref);
     if (!sd) {
         av_buffer_unref(&ref);
-        av_log(NULL, AV_LOG_ERROR, "Could not add new side data\n");
+        av_log(ctx, AV_LOG_ERROR, "Could not add new side data\n");
         return AVERROR(ENOMEM);
     }
 
@@ -225,6 +233,8 @@ static int config_input(AVFilterLink *inlink)
     // right now, no model needs multiple inputs
     av_assert0(info->number == 1);
 
+    if (!desc)
+        return AVERROR(EINVAL);
     vpp->device = (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) ? VPP_DEVICE_HW : VPP_DEVICE_SW;
 
     // allocate frame to save scaled output

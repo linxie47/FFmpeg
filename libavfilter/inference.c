@@ -177,11 +177,11 @@ static int sw_crop_and_scale(AVFrame *frame, Rect *crop_rect,
                              enum AVPixelFormat out_format,
                              uint8_t *data[], int stride[])
 {
-    int bufsize;
-    AVFrame *temp;
-    struct SwsContext *sws_ctx;
+    int ret = 0;
+    AVFrame *temp = NULL;
+    struct SwsContext *sws_ctx = NULL;
     const AVPixFmtDescriptor *desc;
-    int x, y, w, h, hsub, vsub;
+    int x, y, w, h, hsub, vsub, bufsize;
     int max_step[4]; ///< max pixel step for each plane, expressed as a number of bytes
     enum AVPixelFormat expect_format = out_format;
 
@@ -195,6 +195,10 @@ static int sw_crop_and_scale(AVFrame *frame, Rect *crop_rect,
     av_frame_ref(temp, frame);
 
     desc = av_pix_fmt_desc_get(temp->format);
+    if (!desc) {
+        ret = AVERROR(EINVAL);
+        goto exit;
+    }
     hsub = desc->log2_chroma_w;
     vsub = desc->log2_chroma_h;
     av_image_fill_max_pixsteps(max_step, NULL, desc);
@@ -203,8 +207,23 @@ static int sw_crop_and_scale(AVFrame *frame, Rect *crop_rect,
     {
         x = lrintf(crop_rect->x0);
         y = lrintf(crop_rect->y0);
+        x = FFMAX(x, 0);
+        y = FFMAX(y, 0);
+        if (x >= frame->width || y >= frame->height) {
+            av_log(NULL, AV_LOG_ERROR, "Incorrect crop rect x:%d y:%d.\n", x, y);
+            ret = AVERROR(EINVAL);
+            goto exit;
+        }
+
         w = lrintf(crop_rect->x1) - x;
         h = lrintf(crop_rect->y1) - y;
+        w = FFMIN(w, frame->width - x);
+        h = FFMIN(h, frame->height - y);
+        if (w <= 0 || h <= 0) {
+            av_log(NULL, AV_LOG_ERROR, "Incorrect crop rect w:%d h:%d.\n", w, h);
+            ret = AVERROR(EINVAL);
+            goto exit;
+        }
 
         temp->width  = w;
         temp->height = h;
@@ -232,22 +251,24 @@ static int sw_crop_and_scale(AVFrame *frame, Rect *crop_rect,
                              SWS_BILINEAR, NULL, NULL, NULL);
     if (!sws_ctx) {
         av_log(NULL, AV_LOG_ERROR, "Create scaling context failed!\n");
-        return AVERROR(EINVAL);
+        ret = AVERROR(EINVAL);
+        goto exit;
     }
 
     if (!data[0]) {
         bufsize = av_image_alloc(data, stride, out_w, out_h, expect_format, 1);
-        if (bufsize < 0)
-            return AVERROR(ENOMEM);
+        if (bufsize < 0) {
+            ret = AVERROR(ENOMEM);
+            goto exit;
+        }
     }
 
     sws_scale(sws_ctx, (const uint8_t * const*)temp->data,
               temp->linesize, 0, temp->height, data, stride);
-
+exit:
     av_frame_free(&temp);
     sws_freeContext(sws_ctx);
-
-    return 0;
+    return ret;
 }
 
 void av_split(char *str, const char *delim, char **array, int *num, int max)
@@ -345,6 +366,7 @@ int ff_inference_base_create(AVFilterContext *ctx,
     s->model = s->module->load_model_with_config(&config);
     if (!s->model) {
         av_log(ctx, AV_LOG_ERROR, "could not load DNN model\n");
+        av_freep(&s->module);
         av_freep(&s);
         return AVERROR(ENOMEM);
     }
@@ -391,6 +413,8 @@ int ff_inference_base_create(AVFilterContext *ctx,
 #undef DNN_ERR_CHECK
     return 0;
 fail:
+    s->module->free_model(&s->model);
+    av_freep(&s->module);
     av_freep(&s);
     return ret;
 }
@@ -458,12 +482,15 @@ int ff_inference_base_filter_frame(InferenceBaseContext *base, AVFrame *in)
     DNNIOData input = { };
 
     for (int i = 0; i < info->number; i++) {
-        AVFrame *processed_frame;
+        AVFrame *processed_frame = NULL;
         for (int j = 0; j < base->batch_size; j++) {
             if (base->preprocess) {
                 if (base->preprocess(base, i, in, &processed_frame) < 0)
                     return AVERROR(EINVAL);
             }
+
+            if (!processed_frame) return -1;
+
             fill_dnn_data_from_frame(&input, processed_frame, j, 1, i);
             base->model->set_input(base->model->model, &input);
 #if CONFIG_VAAPI
@@ -488,6 +515,8 @@ int ff_inference_base_get_infer_result(InferenceBaseContext *base,
     DNNReturnType ret;
 
     av_assert0(metadata != NULL);
+
+    av_assert0(id < DNN_INPUT_OUTPUT_NUM);
 
     // TODO: change to layer name for multiple outputs
     data.in_out_idx = id;
@@ -547,8 +576,9 @@ static int ff_vaapi_vpp_colour_standard(enum AVColorSpace av_cs)
 #define CS(av, va) case AVCOL_SPC_ ## av: return VAProcColorStandard ## va;
         CS(BT709,     BT709);
         CS(BT470BG,   BT601);
-        CS(SMPTE170M, SMPTE170M);
-        CS(SMPTE240M, SMPTE240M);
+        // WORKAROUND: vaapi driver doesn't support all color space
+        CS(SMPTE170M, None); //SMPTE170M);
+        CS(SMPTE240M, None); //SMPTE240M);
 #undef CS
     default:
         return VAProcColorStandardNone;
@@ -621,7 +651,7 @@ int va_vpp_device_free(VAAPIVpp *va_vpp)
         return 0;
 
     if (va_vpp->va_surface != VA_INVALID_ID) {
-        vaDestroySurfaces(va_vpp->hwctx->display, &va_vpp->va_surface, 1);
+        vas = vaDestroySurfaces(va_vpp->hwctx->display, &va_vpp->va_surface, 1);
         if (vas != VA_STATUS_SUCCESS) {
             av_log(NULL, AV_LOG_ERROR, "Failed to destroy surface %#x: "
                     "%d (%s).\n", va_vpp->va_surface, vas, vaErrorStr(vas));
@@ -734,11 +764,17 @@ static int va_vpp_crop_and_scale(VAAPIVpp *va_vpp,
     } else {
         int _x = lrintf(crop_rect->x0);
         int _y = lrintf(crop_rect->y0);
+        _x = FFMAX(_x, 0);
+        _y = FFMAX(_y, 0);
+        if (_x >= input->width  || _y >= input->height) {
+            av_log(NULL, AV_LOG_ERROR, "Incorrect crop rect!\n");
+            return AVERROR(EINVAL);
+        }
         input_region = (VARectangle) {
             .x      = _x,
             .y      = _y,
-            .width  = lrintf(crop_rect->x1) - _x,
-            .height = lrintf(crop_rect->y1) - _y,
+            .width  = FFMIN(lrintf(crop_rect->x1) - _x, input->width - _x),
+            .height = FFMIN(lrintf(crop_rect->y1) - _y, input->height - _y),
         };
     }
 
@@ -816,7 +852,7 @@ void *ff_read_model_proc(const char *path)
 
     file_size = ff_get_file_size(fp);
 
-    proc_json = av_mallocz(file_size);
+    proc_json = av_mallocz(file_size + 1);
     if (!proc_json)
         goto end;
 
@@ -859,7 +895,8 @@ void ff_load_default_model_proc(ModelInputPreproc *preproc, ModelOutputPostproc 
 
 int ff_parse_input_preproc(const void *json, ModelInputPreproc *m_preproc)
 {
-    cJSON *item, *preproc, *color, *layer, *object_class;
+    cJSON *item, *preproc;
+    cJSON *color = NULL, *layer = NULL, *object_class = NULL;
 
     preproc = cJSON_GetObjectItem(json, "input_preproc");
     if (preproc == NULL) {
@@ -971,7 +1008,8 @@ int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
 
                 proc->labels = ref;
 
-                infer_labels_dump(ref->data);
+                if (ref)
+                    infer_labels_dump(ref->data);
             }
         }
 
