@@ -193,10 +193,13 @@ typedef struct InferDetectionMeta {
 typedef struct InferClassification {
     int     detect_id;        ///< detected bbox index
     char   *name;             ///< class name, e.g. emotion, age
+    char   *layer_name;       ///< output layer name
+    char   *model;            ///< model name
     int     label_id;         ///< label index in labels
     float   confidence;
     float   value;
-    AVBufferRef *label_buf;   ///< label ref buf from label file
+    AVBufferRef *label_buf;   ///< label buffer
+    AVBufferRef *tensor_buf;  ///< output tensor buffer
 } InferClassification;
 
 /* dynamic classifications array */
