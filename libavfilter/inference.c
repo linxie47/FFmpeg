@@ -33,8 +33,8 @@
 
 #include "inference.h"
 
-#if CONFIG_LIBCJSON
-#include <cjson/cJSON.h>
+#if CONFIG_LIBJSON_C
+#include <json-c/json.h>
 #endif
 
 #if CONFIG_VAAPI
@@ -79,6 +79,8 @@ static void infer_labels_buffer_free(void *opaque, uint8_t *data)
 
     for (i = 0; i < labels->num; i++)
         av_freep(&labels->label[i]);
+
+    av_free(labels->label);
 
     av_free(data);
 }
@@ -828,22 +830,17 @@ static int va_vpp_crop_and_scale(VAAPIVpp *va_vpp,
 }
 #endif
 
-#if CONFIG_LIBCJSON
+#if CONFIG_LIBJSON_C
 /*
- * model proc parsing functions using cJSON
+ * model proc parsing functions using JSON-c
  */
-static inline void json_print(cJSON *j)
-{
-    char *string = cJSON_Print(j);
-    if (string)
-        printf("%s\n", string);
-}
-
 void *ff_read_model_proc(const char *path)
 {
     int n, file_size;
-    cJSON *proc_config = NULL;
+    json_object *proc_config = NULL;
     uint8_t *proc_json = NULL;
+    json_tokener *tok = NULL;
+
     FILE *fp = fopen(path, "rb");
     if (!fp) {
         fprintf(stderr, "File open error:%s\n", path);
@@ -860,17 +857,20 @@ void *ff_read_model_proc(const char *path)
 
     UNUSED(n);
 
-    proc_config = cJSON_Parse(proc_json);
+    tok = json_tokener_new();
+    proc_config = json_tokener_parse_ex(tok, proc_json, file_size);
     if (proc_config == NULL) {
-        const char *error_ptr = cJSON_GetErrorPtr();
-        if (error_ptr != NULL)
-            fprintf(stderr, "Error before: %s\n", error_ptr);
+        enum json_tokener_error jerr;
+        jerr = json_tokener_get_error(tok);
+        fprintf(stderr, "Error before: %s\n", json_tokener_error_desc(jerr));
         goto end;
     }
 
 end:
     if (proc_json)
         av_freep(&proc_json);
+    if(tok)
+        json_tokener_free(tok);
     fclose(fp);
     return proc_config;
 }
@@ -895,48 +895,46 @@ void ff_load_default_model_proc(ModelInputPreproc *preproc, ModelOutputPostproc 
 
 int ff_parse_input_preproc(const void *json, ModelInputPreproc *m_preproc)
 {
-    cJSON *item, *preproc;
-    cJSON *color = NULL, *layer = NULL, *object_class = NULL;
+    json_object *jvalue, *preproc, *color, *layer, *object_class;
+    int ret;
 
-    preproc = cJSON_GetObjectItem(json, "input_preproc");
-    if (preproc == NULL) {
+    ret = json_object_object_get_ex((json_object *)json, "input_preproc", &preproc);
+    if (!ret) {
         av_log(NULL, AV_LOG_DEBUG, "No input_preproc.\n");
         return 0;
     }
 
     // not support multiple inputs yet
-    av_assert0(cJSON_GetArraySize(preproc) <= 1);
+    av_assert0(json_object_array_length(preproc) <= 1);
 
-    cJSON_ArrayForEach(item, preproc)
-    {
-        color = cJSON_GetObjectItemCaseSensitive(item, "color_format");
-        layer = cJSON_GetObjectItemCaseSensitive(item, "layer_name");
-        object_class = cJSON_GetObjectItemCaseSensitive(item, "object_class");
-    }
+    jvalue = json_object_array_get_idx(preproc, 0);
 
-    if (color) {
-        if (!cJSON_IsString(color) || (color->valuestring == NULL))
+    ret = json_object_object_get_ex(jvalue, "color_format", &color);
+    if (ret) {
+        if (json_object_get_string(color) == NULL)
             return -1;
 
-        av_log(NULL, AV_LOG_INFO, "Color Format:\"%s\"\n", color->valuestring);
+        av_log(NULL, AV_LOG_INFO, "Color Format:\"%s\"\n", json_object_get_string(color));
 
-        if (!strcmp(color->valuestring, "BGR"))
+        if (!strcmp(json_object_get_string(color), "BGR"))
             m_preproc->color_format = AV_PIX_FMT_BGR24;
-        else if (!strcmp(color->valuestring, "RGB"))
+        else if (!strcmp(json_object_get_string(color), "RGB"))
             m_preproc->color_format = AV_PIX_FMT_RGB24;
         else
             return -1;
     }
 
-    if (object_class) {
-        if (!cJSON_IsString(object_class) || (object_class->valuestring == NULL))
+    ret = json_object_object_get_ex(jvalue, "object_class", &object_class);
+    if (ret) {
+        if (json_object_get_string(object_class) == NULL)
             return -1;
 
-        av_log(NULL, AV_LOG_INFO, "Object_class:\"%s\"\n", object_class->valuestring);
+        av_log(NULL, AV_LOG_INFO, "Object_class:\"%s\"\n", json_object_get_string(object_class));
 
-        m_preproc->object_class = object_class->valuestring;
+        m_preproc->object_class = (char *)json_object_get_string(object_class);
     }
 
+    ret = json_object_object_get_ex(jvalue, "layer_name", &layer);
     UNUSED(layer);
 
     return 0;
@@ -946,33 +944,36 @@ int ff_parse_input_preproc(const void *json, ModelInputPreproc *m_preproc)
 // Layer name and type can be got from output blob.
 int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
 {
-    size_t index = 0;
-    cJSON *item, *postproc;
-    cJSON *attribute, *converter, *labels, *layer, *method, *threshold;
-    cJSON *tensor2text_scale, *tensor2text_precision;
+    json_object *jvalue, *postproc;
+    json_object *attribute, *converter, *labels, *layer, *method, *threshold;
+    json_object *tensor2text_scale, *tensor2text_precision;
+    int ret;
+    size_t jarraylen;
 
-    postproc = cJSON_GetObjectItem(json, "output_postproc");
-    if (postproc == NULL) {
+    ret = json_object_object_get_ex((json_object *)json, "output_postproc", &postproc);
+    if (!ret) {
         av_log(NULL, AV_LOG_DEBUG, "No output_postproc.\n");
         return 0;
     }
 
-    av_assert0(cJSON_GetArraySize(postproc) <= MAX_MODEL_OUTPUT);
-    cJSON_ArrayForEach(item, postproc)
-    {
-        OutputPostproc *proc = &m_postproc->procs[index];
+    jarraylen = json_object_array_length(postproc);
+    av_assert0(jarraylen <= MAX_MODEL_OUTPUT);
 
-#define FETCH_STRING(var, name)                                  \
-        do { var = cJSON_GetObjectItemCaseSensitive(item, #name);\
-            if (var) proc->name = var->valuestring;              \
+    for(int i = 0; i < jarraylen; i++){
+        jvalue = json_object_array_get_idx(postproc, i);
+        OutputPostproc *proc = &m_postproc->procs[i];
+
+#define FETCH_STRING(var, name)                                           \
+        do { ret = json_object_object_get_ex(jvalue, #name, &var);        \
+            if (ret) proc->name = (char *)json_object_get_string(var);    \
         } while(0)
-#define FETCH_DOUBLE(var, name)                                  \
-        do { var = cJSON_GetObjectItemCaseSensitive(item, #name);\
-            if (var) proc->name = var->valuedouble;              \
+#define FETCH_DOUBLE(var, name)                                           \
+        do { ret = json_object_object_get_ex(jvalue, #name, &var);        \
+            if (ret) proc->name = (double)json_object_get_double(var);    \
         } while(0)
-#define FETCH_INTEGER(var, name)                                 \
-        do { var = cJSON_GetObjectItemCaseSensitive(item, #name);\
-            if (var) proc->name = var->valueint;                 \
+#define FETCH_INTEGER(var, name)                                          \
+        do { ret = json_object_object_get_ex(jvalue, #name, &var);        \
+            if (ret) proc->name = (int)json_object_get_int(var);          \
         } while(0)
 
         FETCH_STRING(layer, layer_name);
@@ -986,10 +987,10 @@ int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
         FETCH_INTEGER(tensor2text_precision, tensor2text_precision);
 
         // handle labels
-        labels = cJSON_GetObjectItemCaseSensitive(item, "labels");
-        if (labels) {
-            cJSON *label;
-            size_t labels_num = cJSON_GetArraySize(labels);
+        ret = json_object_object_get_ex(jvalue, "labels", &labels);
+        if (ret) {
+            json_object *label;
+            size_t labels_num = json_object_array_length(labels);
 
             if (labels_num > 0) {
                 AVBufferRef *ref    = NULL;
@@ -998,8 +999,9 @@ int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
                 if (!larray)
                     return AVERROR(ENOMEM);
 
-                cJSON_ArrayForEach(label, labels) {
-                    char *l = av_strdup(label->valuestring);
+                for(int i = 0; i < labels_num; i++){
+                    label = json_object_array_get_idx(labels, i);
+                    char *l = av_strdup(json_object_get_string(label));
                     av_dynarray_add(&larray->label, &larray->num, l);
                 }
 
@@ -1007,14 +1009,13 @@ int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
                         &infer_labels_buffer_free, NULL, 0);
 
                 proc->labels = ref;
-
-                if (ref)
+                 
+                if(ref)
                     infer_labels_dump(ref->data);
             }
         }
-
-        index++;
     }
+
 #undef FETCH_STRING
 #undef FETCH_DOUBLE
 #undef FETCH_INTEGER
@@ -1036,6 +1037,6 @@ void ff_release_model_proc(const void *json,
         }
     }
 
-    cJSON_Delete((cJSON *)json);
+    json_object_put((json_object *)json);
 }
 #endif

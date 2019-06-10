@@ -251,7 +251,7 @@ int va_vpp_surface_release(VAAPIVpp *ctx);
 
 int ff_get_file_size(FILE *fp);
 
-#if CONFIG_LIBCJSON
+#if CONFIG_LIBJSON_C
 void *ff_read_model_proc(const char *path);
 
 void ff_load_default_model_proc(ModelInputPreproc *preproc, ModelOutputPostproc *postproc);

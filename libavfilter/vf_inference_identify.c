@@ -34,7 +34,7 @@
 
 #include "inference.h"
 
-#include <cjson/cJSON.h>
+#include <json-c/json.h>
 
 #define OFFSET(x) offsetof(InferenceIdentifyContext, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_FILTERING_PARAM)
@@ -103,11 +103,12 @@ static av_cold int identify_init(AVFilterContext *ctx)
     size_t i, index = 1;
     char *dup, *unknown;
     const char *dirname;
-    cJSON *entry, *item;
+    json_object *entry;
     LabelsArray *larray = NULL;
     AVBufferRef *ref    = NULL;
     InferenceIdentifyContext *s = ctx->priv;
     size_t vec_size_in_bytes = sizeof(float) * FACE_FEATURE_VECTOR_LEN;
+    int ret;
 
     av_assert0(s->gallery);
 
@@ -133,54 +134,60 @@ static av_cold int identify_init(AVFilterContext *ctx)
     unknown = av_strdup("Unknown_Person");
     av_dynarray_add(&larray->label, &larray->num, unknown);
 
-    cJSON_ArrayForEach(item, entry)
-    {
-        char *l = av_strdup(item->string);
-        cJSON *features, *feature;
+    json_object_object_foreach(entry, key, jvalue){
+        char *l = av_strdup(key);
+        json_object *features, *feature;
 
         av_dynarray_add(&larray->label, &larray->num, l);
 
-        features = cJSON_GetObjectItem(item, "features");
+        ret = json_object_object_get_ex(jvalue, "features", &features);
+        if (ret) {
+            size_t features_num = json_object_array_length(features);
 
-        cJSON_ArrayForEach(feature, features)
-        {
-            FILE *vec_fp;
-            FeatureLabelPair *pair;
-            char path[4096];
+            for(int i = 0; i < features_num; i++){
+                FILE *vec_fp;
+                FeatureLabelPair *pair;
+                char path[4096];
 
-            memset(path, 0, sizeof(path));
+                memset(path, 0, sizeof(path));
 
-            if (!cJSON_IsString(feature) || !feature->valuestring)
-                continue;
+                feature = json_object_array_get_idx(features, i);
+                if (json_object_get_string(feature) == NULL)
+                    continue;
 
-            strncpy(path, dirname, strlen(dirname));
-            strncat(path, "/", 1);
-            strncat(path, feature->valuestring, strlen(feature->valuestring));
+                strncpy(path, dirname, strlen(dirname));
+                strncat(path, "/", 1);
+                strncat(path, json_object_get_string(feature), strlen(json_object_get_string(feature)));
 
-            vec_fp = fopen(path, "rb");
-            if (!vec_fp) {
-                av_log(ctx, AV_LOG_ERROR, "Could not open feature file:%s\n", path);
-                continue;
-            }
+                vec_fp = fopen(path, "rb");
+                if (!vec_fp) {
+                    av_log(ctx, AV_LOG_ERROR, "Could not open feature file:%s\n", path);
+                    continue;
+                }
 
-            pair = av_mallocz(sizeof(FeatureLabelPair));
-            if (!pair)
-                return AVERROR(ENOMEM);
+                pair = av_mallocz(sizeof(FeatureLabelPair));
+                if (!pair){
+                    fclose(vec_fp);
+                    return AVERROR(ENOMEM);
+                }
 
-            pair->feature = av_malloc(vec_size_in_bytes);
-            if (!pair->feature)
-                return AVERROR(ENOMEM);
+                pair->feature = av_malloc(vec_size_in_bytes);
+                if (!pair->feature){
+                    fclose(vec_fp);
+                    return AVERROR(ENOMEM);
+                }
 
-            if (fread(pair->feature, vec_size_in_bytes, 1, vec_fp) != 1) {
-                av_log(ctx, AV_LOG_ERROR, "Feature vector size mismatch:%s\n", path);
+                if (fread(pair->feature, vec_size_in_bytes, 1, vec_fp) != 1) {
+                    av_log(ctx, AV_LOG_ERROR, "Feature vector size mismatch:%s\n", path);
+                    fclose(vec_fp);
+                    return AVERROR(EINVAL);
+                }
+
                 fclose(vec_fp);
-                return AVERROR(EINVAL);
+
+                pair->label_id = index;
+                av_dynarray_add(&s->features, &s->features_num, pair);
             }
-
-            fclose(vec_fp);
-
-            pair->label_id = index;
-            av_dynarray_add(&s->features, &s->features_num, pair);
         }
         index++;
     }
@@ -208,9 +215,12 @@ static av_cold void identify_uninit(AVFilterContext *ctx)
 
     av_buffer_unref(&s->labels);
 
-    for (i = 0; i < s->features_num; i++) {
-        av_freep(&s->features[i]->feature);
-        av_freep(&s->features[i]);
+    if (s->features) {
+        for (i = 0; i < s->features_num; i++) {
+            av_freep(&s->features[i]->feature);
+            av_freep(&s->features[i]);
+        }
+        av_free(s->features);
     }
     if (s->norm_std)
         av_free(s->norm_std);

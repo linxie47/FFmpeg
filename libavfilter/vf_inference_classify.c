@@ -82,6 +82,7 @@ static void infer_classify_metadata_buffer_free(void *opaque, uint8_t *data)
             av_buffer_unref(&c->tensor_buf);
             av_freep(&c);
         }
+        av_free(classes->classifications);
         av_freep(&classes);
     }
 
@@ -253,10 +254,14 @@ static int default_postprocess(AVFilterContext *ctx,
     classify->detect_id  = detect_id;
     classify->layer_name = info->layer_name[result_id];
     classify->model      = s->model_file;
+    classify->name       = (char *)"default";
 
     classify->tensor_buf = av_buffer_alloc(meta->total_bytes);
-    if (!classify->tensor_buf)
+    if (!classify->tensor_buf) {
+        av_free(classify);
         return AVERROR(ENOMEM);
+    }
+
     if (meta->total_bytes > 0)
         memcpy(classify->tensor_buf->data, meta->data, meta->total_bytes);
 
@@ -494,6 +499,11 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
             // care interested object class only
             if (preproc && preproc->object_class && bbox->label_buf) {
                 LabelsArray *array = (LabelsArray *)bbox->label_buf->data;
+                if (bbox->label_id >= array->num) {
+                    av_log(NULL, AV_LOG_ERROR, "The json file must match the input model\n");
+                    ret = AVERROR(ERANGE);
+                    goto fail;
+                }
                 if (0 != strcmp(preproc->object_class, array->label[bbox->label_id]))
                     continue;
             }

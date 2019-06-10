@@ -58,6 +58,7 @@ typedef struct InferenceDetectContext {
     int    batch_size;
     int    frame_number;
     int    every_nth_frame;
+    int    max_count;
     float  threshold;
 
     int    input_layout;
@@ -82,6 +83,7 @@ static void infer_detect_metadata_buffer_free(void *opaque, uint8_t *data)
                 av_buffer_unref(&p->label_buf);
             av_freep(&p);
         }
+        av_free(bboxes->bbox);
         av_freep(&bboxes);
     }
 
@@ -140,6 +142,9 @@ static int detect_postprocess(AVFilterContext *ctx, InferTensorMeta *meta, AVFra
             new_bbox->label_buf = av_buffer_ref(s->model_postproc.procs[0].labels);
 
         av_dynarray_add(&boxes->bbox, &boxes->num, new_bbox);
+
+        if (boxes->num >= s->max_count)
+            break;
     }
 
     // dump face detected meta
@@ -427,9 +432,10 @@ static const AVOption inference_detect_options[] = {
     { "model_proc",  "model preproc and postproc",      OFFSET(model_proc),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
     { "device",      "running on device type",          OFFSET(device_type),     AV_OPT_TYPE_FLAGS,  { .i64 = DNN_TARGET_DEVICE_CPU }, 0, 12, FLAGS },
     { "vpp_format",  "specify vpp output format",       OFFSET(vpp_format),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
-    { "interval",    "detect every Nth frame",          OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1024, FLAGS},
-    { "batch_size",  "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1024, FLAGS},
-    { "threshold",   "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5}, 0, 1,    FLAGS},
+    { "interval",    "detect every Nth frame",          OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 },   1, 1024,    FLAGS},
+    { "batch_size",  "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },   1, 1024,    FLAGS},
+    { "max_count",   "max count of output result",      OFFSET(max_count),       AV_OPT_TYPE_INT,    { .i64 = 1000}, 1, INT_MAX, FLAGS},
+    { "threshold",   "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5},  0, 1,       FLAGS},
 
     { NULL }
 };
