@@ -18,7 +18,7 @@
 
 /**
  * @file
- * dnn inference detection filter
+ * image inference filter used for object detection
  */
 
 #include "libavutil/opt.h"
@@ -31,183 +31,40 @@
 #include "formats.h"
 #include "internal.h"
 #include "avfilter.h"
+#include "filters.h"
 #include "libavcodec/avcodec.h"
 #include "libavformat/avformat.h"
-#include "libswscale/swscale.h"
+#include "libavutil/time.h"
 
-#include "inference.h"
-#include "dnn_interface.h"
+#include "inference_backend/ff_base_inference.h"
 
-#define OFFSET(x) offsetof(InferenceDetectContext, x)
+#define OFFSET(x) offsetof(IEDetectContext, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_FILTERING_PARAM)
 
-#define FUNC_ENTRY() printf("enter >>> %s\n", __FUNCTION__);
-#define FUNC_EXIT()  printf("exit  <<< %s\n", __FUNCTION__);
+static int flush_frame(AVFilterContext *ctx, AVFilterLink *outlink, int64_t pts, int64_t *out_pts);
 
-typedef struct InferenceDetectContext {
+
+typedef struct IEDetectContext {
     const AVClass *class;
 
-    InferenceBaseContext *base;
+    FFBaseInference *base;
 
-    char  *model_file;
-    char  *vpp_format;
-    char  *model_proc;
+    FF_INFERENCE_OPTIONS
+
+    int    async_preproc;
     int    backend_type;
-    int    device_type;
-
-    int    batch_size;
-    int    frame_number;
-    int    every_nth_frame;
-    int    max_count;
-    float  threshold;
-
-    int    input_layout;
-    int    input_precision;
-    int    input_is_image;
-
-    void  *proc_config;
-
-    ModelInputPreproc   model_preproc;
-    ModelOutputPostproc model_postproc;
-} InferenceDetectContext;
-
-static void infer_detect_metadata_buffer_free(void *opaque, uint8_t *data)
-{
-    BBoxesArray *bboxes = ((InferDetectionMeta *)data)->bboxes;
-
-    if (bboxes) {
-        int i;
-        for (i = 0; i < bboxes->num; i++) {
-            InferDetection *p = bboxes->bbox[i];
-            if (p->label_buf)
-                av_buffer_unref(&p->label_buf);
-            av_freep(&p);
-        }
-        av_free(bboxes->bbox);
-        av_freep(&bboxes);
-    }
-
-    av_free(data);
-}
-
-static int detect_postprocess(AVFilterContext *ctx, InferTensorMeta *meta, AVFrame *frame)
-{
-    int i;
-    InferenceDetectContext *s = ctx->priv;
-    int object_size           = meta->dims[3];
-    int max_proposal_count    = meta->dims[2];
-    const float *detection    = (float *)meta->data;
-    AVBufferRef *ref;
-    AVFrameSideData *sd;
-    InferDetectionMeta *detect_meta = NULL;
-
-    BBoxesArray *boxes        = av_mallocz(sizeof(*boxes));
-    if (!boxes)
-        return AVERROR(ENOMEM);
-
-    detect_meta = av_malloc(sizeof(*detect_meta));
-    if (!detect_meta) {
-        av_free(boxes);
-        return AVERROR(ENOMEM);
-    }
-
-    // FIXME: output object size standard??
-    av_assert0(object_size == 7);
-
-    av_assert0(meta->precision == DNN_DATA_PRECISION_FP32);
-
-    av_assert0(meta->total_bytes >= max_proposal_count * object_size * sizeof(float));
-
-    for (i = 0; i < max_proposal_count; i++) {
-        InferDetection *new_bbox = av_mallocz(sizeof(*new_bbox));
-        if (!new_bbox) {
-            av_log(ctx, AV_LOG_ERROR, "Could not alloc bbox!\n");
-            break;
-        }
-
-        new_bbox->label_id   = (int)detection[i * object_size + 1];
-        new_bbox->confidence = detection[i * object_size + 2];
-        new_bbox->x_min      = detection[i * object_size + 3];
-        new_bbox->y_min      = detection[i * object_size + 4];
-        new_bbox->x_max      = detection[i * object_size + 5];
-        new_bbox->y_max      = detection[i * object_size + 6];
-
-        if (new_bbox->confidence < s->threshold) {
-            av_freep(&new_bbox);
-            continue;
-        }
-
-        // TODO: use layer name to get proc
-        if (s->model_postproc.procs[0].labels)
-            new_bbox->label_buf = av_buffer_ref(s->model_postproc.procs[0].labels);
-
-        av_dynarray_add(&boxes->bbox, &boxes->num, new_bbox);
-
-        if (boxes->num >= s->max_count)
-            break;
-    }
-
-    // dump face detected meta
-    for (i = 0; i < boxes->num; i++) {
-        InferDetection *p = boxes->bbox[i];
-        av_log(ctx, AV_LOG_DEBUG,
-               "DETECT META - label:%d confi:%f coord:%f %f %f %f\n",
-               p->label_id, p->confidence,p->x_min, p->y_min, p->x_max, p->y_max);
-    }
-
-    detect_meta->bboxes = boxes;
-
-    ref = av_buffer_create((uint8_t *)detect_meta, sizeof(*detect_meta),
-                           &infer_detect_metadata_buffer_free, NULL, 0);
-    if (!ref) {
-        infer_detect_metadata_buffer_free(NULL, (uint8_t *)detect_meta);
-        return AVERROR(ENOMEM);
-    }
-
-    // add meta data to side data
-    sd = av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_INFERENCE_DETECTION, ref);
-    if (!sd) {
-        av_buffer_unref(&ref);
-        av_log(ctx, AV_LOG_ERROR, "Could not add new side data\n");
-        return AVERROR(ENOMEM);
-    }
-
-    return 0;
-}
-
-static int detect_preprocess(InferenceBaseContext *base, int index, AVFrame *in, AVFrame **out)
-{
-    int ret;
-    VideoPP *vpp = ff_inference_base_get_vpp(base);
-    AVFrame *tmp = vpp->frames[index];
-
-    if (vpp->device == VPP_DEVICE_SW) {
-        if (!vpp->sw_vpp->scale_contexts[index]) {
-            *out = in;
-            return 0;
-        }
-
-        ret = vpp->sw_vpp->scale(vpp->sw_vpp->scale_contexts[index],
-                (const uint8_t * const*)in->data,
-                in->linesize, 0, in->height, tmp->data, tmp->linesize);
-    } else {
-#if CONFIG_VAAPI
-        ret = vpp->va_vpp->scale(vpp->va_vpp, in,
-                tmp->width, tmp->height, tmp->data, tmp->linesize);
-#endif
-    }
-    *out = tmp;
-    return ret;
-}
+    int    already_flushed;
+    char  *crop_params;
+} IEDetectContext;
 
 static int query_formats(AVFilterContext *context)
 {
     AVFilterFormats *formats_list;
     const enum AVPixelFormat pixel_formats[] = {
-        AV_PIX_FMT_YUV420P,  AV_PIX_FMT_YUV422P,  AV_PIX_FMT_YUV444P,
-        AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ444P,
-        AV_PIX_FMT_YUV410P,  AV_PIX_FMT_YUV411P,  AV_PIX_FMT_GRAY8,
-        AV_PIX_FMT_BGR24,    AV_PIX_FMT_BGRA,     AV_PIX_FMT_VAAPI,
+        AV_PIX_FMT_YUV420P,  AV_PIX_FMT_NV12,
+        AV_PIX_FMT_BGR24,    AV_PIX_FMT_BGRA,
+        AV_PIX_FMT_BGR0,     AV_PIX_FMT_RGBP,
+        AV_PIX_FMT_BGRA,     AV_PIX_FMT_VAAPI,
         AV_PIX_FMT_NONE};
 
     formats_list = ff_make_format_list(pixel_formats);
@@ -221,221 +78,242 @@ static int query_formats(AVFilterContext *context)
 
 static int config_input(AVFilterLink *inlink)
 {
-    int ret;
-    AVFrame *frame;
-    AVFilterContext      *ctx        = inlink->dst;
-    InferenceDetectContext *s        = ctx->priv;
-    enum AVPixelFormat expect_format = AV_PIX_FMT_BGR24;
-
+    int ret = 0;
+    AVFilterContext *ctx = inlink->dst;
+    IEDetectContext *s = ctx->priv;
     const AVPixFmtDescriptor *desc   = av_pix_fmt_desc_get(inlink->format);
-    DNNModelInfo *info               = ff_inference_base_get_input_info(s->base);
-    VideoPP *vpp                     = ff_inference_base_get_vpp(s->base);
-
-    int width = info->dims[0][0], height = info->dims[0][1];
-
-    ff_inference_dump_model_info(ctx, info);
-
-    // right now, no model needs multiple inputs
-    av_assert0(info->number == 1);
-
-    if (!desc)
+    if (desc == NULL)
         return AVERROR(EINVAL);
-    vpp->device = (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) ? VPP_DEVICE_HW : VPP_DEVICE_SW;
 
-    // allocate frame to save scaled output
-    frame = av_frame_alloc();
-    if (!frame)
-        return AVERROR(ENOMEM);
-    frame->width   = width;
-    frame->height  = height;
-    frame->format  = expect_format;
-    vpp->frames[0] = frame;
+    FFInferenceParam param = { };
 
-    if (vpp->device == VPP_DEVICE_SW) {
-        int need_scale = expect_format != inlink->format ||
-                         width         != inlink->w      ||
-                         height        != inlink->h;
+    av_assert0(s->model);
 
-        if (need_scale) {
-            if (av_frame_get_buffer(frame, 0) < 0) {
-                av_frame_free(&frame);
-                return AVERROR(ENOMEM);
-            }
+    param.model           = s->model;
+    param.device          = s->device;
+    param.nireq           = s->nireq;
+    param.batch_size      = s->batch_size;
+    param.every_nth_frame = s->every_nth_frame;
+    param.threshold       = s->threshold;
+    param.is_full_frame   = 1;
+    param.infer_config    = s->infer_config;
+    param.model_proc      = s->model_proc;
+    param.opaque          = s->async_preproc ? (void *)MOCKER_PRE_PROC_MAGIC : 0;
 
-            vpp->sw_vpp->scale_contexts[0] = sws_getContext(
-                    inlink->w, inlink->h, inlink->format,
-                    width, height, expect_format,
-                    SWS_BILINEAR, NULL, NULL, NULL);
-
-            if (!vpp->sw_vpp->scale_contexts[0]) {
-                av_log(ctx, AV_LOG_ERROR, "Impossible to create scale context\n");
-                av_frame_free(&frame);
-                return AVERROR(EINVAL);
-            }
-        }
-    } else {
-#if CONFIG_VAAPI
-        vpp->va_vpp = av_mallocz(sizeof(*vpp->va_vpp));
-        if (!vpp->va_vpp) {
-            ret = AVERROR(ENOMEM);
-            goto fail;
-        }
-
-        ret = va_vpp_device_create(vpp->va_vpp, inlink);
-        if (ret < 0) {
-            av_log(ctx, AV_LOG_ERROR, "Create va vpp device failed\n");
-            ret = AVERROR(EINVAL);
-            goto fail;
-        }
-
-        ret = va_vpp_surface_alloc(vpp->va_vpp, width, height, s->vpp_format);
-        if (ret < 0) {
-            av_log(ctx, AV_LOG_ERROR, "Create va surface failed\n");
-            ret = AVERROR(EINVAL);
-            goto fail;
-        }
-
-        frame->format = vpp->va_vpp->av_format;
-#endif
-    }
-
-    return 0;
-fail:
-    av_frame_free(&frame);
-#if CONFIG_VAAPI
-    if (vpp->va_vpp) {
-        va_vpp_device_free(vpp->va_vpp);
-        av_freep(&vpp->va_vpp);
-    }
-#endif
-    return ret;
-}
-
-static int config_output(AVFilterLink *outlink)
-{
-    AVFilterContext      *ctx = outlink->src;
-    InferenceDetectContext *s = ctx->priv;
-    VideoPP *vpp              = ff_inference_base_get_vpp(s->base);
-
-    DNNModelInfo *info = ff_inference_base_get_output_info(s->base);
-
-    ff_inference_dump_model_info(ctx, info);
-
-#if CONFIG_VAAPI
-    if (vpp->device == VPP_DEVICE_HW) {
-        if (!vpp->va_vpp || !vpp->va_vpp->hw_frames_ref) {
-            av_log(ctx, AV_LOG_ERROR, "The input must have a hardware frame "
-                    "reference.\n");
+    if (s->crop_params) {
+        sscanf(s->crop_params, "%d|%d|%d|%d",
+                &param.crop_rect.x, &param.crop_rect.y, &param.crop_rect.width, &param.crop_rect.height);
+        if (param.crop_rect.x < 0         || param.crop_rect.y < 0      ||
+                param.crop_rect.width < 0 || param.crop_rect.height < 0 ||
+                param.crop_rect.width  + param.crop_rect.x > inlink->w  ||
+                param.crop_rect.height + param.crop_rect.y > inlink->h) {
+            av_log(ctx, AV_LOG_ERROR, "Invalid cropping parameters.\n");
             return AVERROR(EINVAL);
         }
-        outlink->hw_frames_ctx = av_buffer_ref(vpp->va_vpp->hw_frames_ref);
-        if (!outlink->hw_frames_ctx)
-            return AVERROR(ENOMEM);
     }
-#endif
 
-    return 0;
+    s->base = av_base_inference_create(ctx->filter->name);
+    if (!s->base) {
+        av_log(ctx, AV_LOG_ERROR, "Could not create inference.\n");
+        return AVERROR(EINVAL);
+    }
+
+    if (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
+        AVHWFramesContext *hw_frm_ctx = (AVHWFramesContext *)inlink->hw_frames_ctx->data;
+        AVHWDeviceContext *dev_ctx = (AVHWDeviceContext *)hw_frm_ctx->device_ref->data;
+#if CONFIG_VAAPI
+        param.vpp_device = VPP_DEVICE_HW;
+        param.opaque = (void *)((AVVAAPIDeviceContext *)dev_ctx->hwctx)->display;
+#endif
+        for (int i = 0; i < ctx->nb_outputs; i++) {
+            if (!ctx->outputs[i]->hw_frames_ctx)
+                ctx->outputs[i]->hw_frames_ctx = av_buffer_ref(inlink->hw_frames_ctx);
+        }
+    }
+
+    ret = av_base_inference_set_params(s->base, &param);
+
+    return ret;
 }
 
 static av_cold int detect_init(AVFilterContext *ctx)
 {
-    int ret;
-    InferenceDetectContext *s = ctx->priv;
-    InferenceParam p = {};
-
-    av_assert0(s->model_file);
-
-    av_assert0(s->backend_type == DNN_INTEL_IE);
-
-    ff_load_default_model_proc(&s->model_preproc, &s->model_postproc);
-
-    if (s->model_proc) {
-        void *proc = ff_read_model_proc(s->model_proc);
-        if (!proc) {
-            av_log(ctx, AV_LOG_ERROR, "Could not read proc config file:"
-                    "%s\n", s->model_proc);
-            return AVERROR(EIO);
-        }
-
-        if (ff_parse_input_preproc(proc, &s->model_preproc) < 0) {
-            av_log(ctx, AV_LOG_ERROR, "Parse input preproc error.\n");
-            return AVERROR(EIO);
-        }
-
-        if (ff_parse_output_postproc(proc, &s->model_postproc) < 0) {
-            av_log(ctx, AV_LOG_ERROR, "Parse output postproc error.\n");
-            return AVERROR(EIO);
-        }
-
-        s->proc_config = proc;
-    }
-
-    p.model_file      = s->model_file;
-    p.backend_type    = s->backend_type;
-    p.device_type     = s->device_type;
-    p.batch_size      = s->batch_size;
-    p.input_precision = DNN_DATA_PRECISION_U8;
-    p.input_layout    = DNN_DATA_LAYOUT_NCHW;
-    p.input_is_image  = 1;
-    p.preprocess      = &detect_preprocess;
-
-    ret = ff_inference_base_create(ctx, &s->base, &p);
-    if (ret < 0) {
-        av_log(ctx, AV_LOG_ERROR, "Could not create inference\n");
-        return ret;
-    }
-
+    /* moved to config_input */
     return 0;
 }
 
 static av_cold void detect_uninit(AVFilterContext *ctx)
 {
-    InferenceDetectContext *s = ctx->priv;
+    IEDetectContext *s = ctx->priv;
 
-    ff_inference_base_free(&s->base);
+    flush_frame(ctx, NULL, 0LL, NULL);
 
-    ff_release_model_proc(s->proc_config, &s->model_preproc, &s->model_postproc);
+    av_base_inference_release(s->base);
 }
 
-static int filter_frame(AVFilterLink *inlink, AVFrame *in)
+static int flush_frame(AVFilterContext *ctx, AVFilterLink *outlink, int64_t pts, int64_t *out_pts)
 {
-    int ret;
-    AVFilterContext *ctx      = inlink->dst;
-    InferenceDetectContext *s = ctx->priv;
-    AVFilterLink *outlink     = inlink->dst->outputs[0];
-    InferTensorMeta tensor_meta = { };
+    int ret = 0;
+    IEDetectContext *s = ctx->priv;
 
-    if (s->frame_number % s->every_nth_frame != 0)
-        goto done;
+    if (s->already_flushed)
+        return ret;
 
-    ret = ff_inference_base_filter_frame(s->base, in);
-    if (ret < 0)
-        goto fail;
+    while (!av_base_inference_frame_queue_empty(ctx, s->base)) {
+        AVFrame *output = NULL;
+        av_base_inference_get_frame(ctx, s->base, &output);
+        if (output) {
+            if (outlink) {
+                ret = ff_filter_frame(outlink, output);
+                if (out_pts)
+                    *out_pts = output->pts + pts;
+            } else {
+                av_frame_free(&output);
+            }
+        }
 
-    ret = ff_inference_base_get_infer_result(s->base, 0, &tensor_meta);
-    if (ret < 0)
-        goto fail;
+        av_base_inference_send_event(ctx, s->base, INFERENCE_EVENT_EOS);
+        av_usleep(5000);
+    }
 
-    detect_postprocess(ctx, &tensor_meta, in);
+    s->already_flushed = 1;
+    return ret;
+}
 
-done:
-    s->frame_number++;
-    return ff_filter_frame(outlink, in);
-fail:
-    av_frame_free(&in);
-    return AVERROR(EIO);
+static int load_balance(AVFilterContext *ctx)
+{
+    AVFilterLink *inlink = ctx->inputs[0];
+    AVFilterLink *outlink = ctx->outputs[0];
+    IEDetectContext *s = ctx->priv;
+    AVFrame *in = NULL, *output = NULL;
+    int64_t pts;
+    int ret, status;
+    int resource, got_frames = 0;
+    int get_frame_status;
+
+    FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
+
+    // drain all processed frames
+    do {
+        get_frame_status = av_base_inference_get_frame(ctx, s->base, &output);
+        if (output) {
+            int ret_val = ff_filter_frame(outlink, output);
+            if (ret_val < 0)
+                return ret_val;
+
+            got_frames = 1;
+            output = NULL;
+        }
+    } while (get_frame_status == 0);
+
+    status = ff_outlink_get_status(inlink);
+    if (status)
+        resource = ff_inlink_queued_frames(inlink);
+    else
+        resource = av_base_inference_resource_status(ctx, s->base);
+
+    while (resource > 0) {
+        ret = ff_inlink_consume_frame(inlink, &in);
+        if (ret < 0)
+            return ret;
+        if (ret == 0)
+            break;
+        if (ret > 0) {
+            av_base_inference_send_frame(ctx, s->base, in);
+        }
+        resource--;
+    }
+
+    if (!status && got_frames)
+        return 0;
+
+    if (ff_inlink_acknowledge_status(inlink, &status, &pts)) {
+        if (status == AVERROR_EOF) {
+            int64_t out_pts = pts;
+
+            av_log(ctx, AV_LOG_INFO, "Get EOS.\n");
+            ret = flush_frame(ctx, outlink, pts, &out_pts);
+            ff_outlink_set_status(outlink, status, out_pts);
+            return ret;
+        }
+    }
+
+    FF_FILTER_FORWARD_WANTED(outlink, inlink);
+
+    return FFERROR_NOT_READY;
+}
+
+static int activate(AVFilterContext *ctx)
+{
+    AVFilterLink *inlink = ctx->inputs[0];
+    AVFilterLink *outlink = ctx->outputs[0];
+    IEDetectContext *s = ctx->priv;
+    AVFrame *in = NULL, *output = NULL;
+    int64_t pts;
+    int ret, status;
+    int got_frame = 0;
+
+    if (av_load_balance_get())
+        return load_balance(ctx);
+
+    FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
+
+    do {
+        int get_frame_status;
+        // drain all input frames
+        ret = ff_inlink_consume_frame(inlink, &in);
+        if (ret < 0)
+            return ret;
+        if (ret > 0)
+            av_base_inference_send_frame(ctx, s->base, in);
+
+        // drain all processed frames
+        do {
+            get_frame_status = av_base_inference_get_frame(ctx, s->base, &output);
+            if (output) {
+                int ret_val = ff_filter_frame(outlink, output);
+                if (ret_val < 0)
+                    return ret_val;
+
+                got_frame = 1;
+                output = NULL;
+            }
+        } while (get_frame_status == 0);
+    } while (ret > 0);
+
+    // if frame got, schedule to next filter
+    if (got_frame)
+        return 0;
+
+    if (ff_inlink_acknowledge_status(inlink, &status, &pts)) {
+        if (status == AVERROR_EOF) {
+            int64_t out_pts = pts;
+
+            av_log(ctx, AV_LOG_INFO, "Get EOS.\n");
+            ret = flush_frame(ctx, outlink, pts, &out_pts);
+            ff_outlink_set_status(outlink, status, out_pts);
+            return ret;
+        }
+    }
+
+    FF_FILTER_FORWARD_WANTED(outlink, inlink);
+
+    return FFERROR_NOT_READY;
 }
 
 static const AVOption inference_detect_options[] = {
-    { "dnn_backend", "DNN backend for model execution", OFFSET(backend_type),    AV_OPT_TYPE_FLAGS,  { .i64 = DNN_INTEL_IE },          0, 2,  FLAGS, "engine" },
-    { "model",       "path to model file for network",  OFFSET(model_file),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
-    { "model_proc",  "model preproc and postproc",      OFFSET(model_proc),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
-    { "device",      "running on device type",          OFFSET(device_type),     AV_OPT_TYPE_FLAGS,  { .i64 = DNN_TARGET_DEVICE_CPU }, 0, 12, FLAGS },
-    { "vpp_format",  "specify vpp output format",       OFFSET(vpp_format),      AV_OPT_TYPE_STRING, { .str = NULL},                   0, 0,  FLAGS },
-    { "interval",    "detect every Nth frame",          OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 },   1, 1024,    FLAGS},
-    { "batch_size",  "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },   1, 1024,    FLAGS},
-    { "max_count",   "max count of output result",      OFFSET(max_count),       AV_OPT_TYPE_INT,    { .i64 = 1000}, 1, INT_MAX, FLAGS},
-    { "threshold",   "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5},  0, 1,       FLAGS},
+    { "dnn_backend",  "DNN backend for model execution", OFFSET(backend_type),    AV_OPT_TYPE_FLAGS,  { .i64 = 1},          0, 2,  FLAGS },
+    { "model",        "path to model file for network",  OFFSET(model),           AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
+    { "model_proc",   "model preproc and postproc",      OFFSET(model_proc),      AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
+    { "object_class", "objective class",                 OFFSET(object_class),    AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
+    { "device",       "running on device name",          OFFSET(device),          AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
+    { "configs",      "configurations to backend",       OFFSET(infer_config),    AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
+    { "interval",     "detect every Nth frame",          OFFSET(every_nth_frame), AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1024, FLAGS},
+    { "nireq",        "inference request number",        OFFSET(nireq),           AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 128,  FLAGS},
+    { "batch_size",   "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1000, FLAGS},
+    { "threshold",    "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5}, 0, 1,    FLAGS},
+    { "crop_params",  "cropping rectangle format x|y|w|h", OFFSET(crop_params),   AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
+    { "async_preproc", "do asynchronous preproc in inference backend", OFFSET(async_preproc), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, FLAGS },
 
     { NULL }
 };
@@ -447,7 +325,6 @@ static const AVFilterPad detect_inputs[] = {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
         .config_props  = config_input,
-        .filter_frame  = filter_frame,
     },
     { NULL }
 };
@@ -456,16 +333,16 @@ static const AVFilterPad detect_outputs[] = {
     {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
-        .config_props  = config_output,
     },
     { NULL }
 };
 
 AVFilter ff_vf_inference_detect = {
     .name          = "detect",
-    .description   = NULL_IF_CONFIG_SMALL("DNN Inference detection."),
-    .priv_size     = sizeof(InferenceDetectContext),
+    .description   = NULL_IF_CONFIG_SMALL("Image Inference Detect Filter."),
+    .priv_size     = sizeof(IEDetectContext),
     .query_formats = query_formats,
+    .activate      = activate,
     .init          = detect_init,
     .uninit        = detect_uninit,
     .inputs        = detect_inputs,

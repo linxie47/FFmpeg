@@ -53,6 +53,7 @@ static AVMutex mutex = AV_MUTEX_INITIALIZER;
 
 static int av_log_level = AV_LOG_INFO;
 static int av_profiling = 0;
+static int av_load_balance = 0;
 static int flags;
 
 #define NB_LEVELS 8
@@ -411,6 +412,16 @@ int av_profiling_get(void)
 void av_profiling_set(int arg)
 {
     av_profiling = arg;
+}
+
+void av_load_balance_set(int arg)
+{
+    av_load_balance = arg;
+}
+
+int av_load_balance_get(void)
+{
+    return av_load_balance;
 }
 
 static void missing_feature_sample(int sample, void *avc, const char *msg,

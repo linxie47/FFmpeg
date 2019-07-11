@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Pengfei Qu, Lin Xie
+ * Copyright (c) 2018-2019 Intel Corporation
  *
  * This file is part of FFmpeg.
  *
@@ -18,23 +18,38 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-/**
- * @file
- * DNN inference functions interface for intel inference engine backend.
- */
+#ifndef __FF_LIST_H
+#define __FF_LIST_H
 
+typedef void *iterator;
 
-#ifndef AVFILTER_DNN_BACKEND_INTEL_IE_H
-#define AVFILTER_DNN_BACKEND_INTEL_IE_H
+typedef struct __ff_list {
+    const void *opaque; // private data
 
-#include "dnn_interface.h"
+    void *(*pop_back)(void *thiz);
 
-DNNModel *ff_dnn_load_model_intel_ie(void *model_config);
+    void *(*pop_front)(void *thiz);
 
-DNNReturnType ff_dnn_execute_model_intel_ie(const DNNModel *model);
+    void (*push_back)(void *thiz, void *item);
 
-void ff_dnn_free_model_intel_ie(DNNModel** model);
+    void (*push_front)(void *thiz, void *item);
 
-DNNReturnType ff_dnn_create_model_intel_ie(const DNNModel *model);
+    void *(*front)(void *thiz);
 
-#endif
+    void *(*next)(void *thiz, void *current);
+
+    int (*empty)(void *thiz);
+
+    unsigned long (*size)(void *thiz);
+
+    iterator (*iterator_get)(void *thiz);
+
+    iterator (*iterate_next)(void *thiz, iterator it);
+
+    void *(*iterate_value)(iterator it);
+} ff_list_t;
+
+ff_list_t *ff_list_alloc(void);
+void ff_list_free(ff_list_t *thiz);
+
+#endif // __FF_LIST_H

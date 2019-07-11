@@ -95,6 +95,7 @@ int do_deinterlace    = 0;
 int do_benchmark      = 0;
 int do_benchmark_all  = 0;
 int do_profiling_all  = 0;
+int load_balance      = 0;
 int do_hex_dump       = 0;
 int do_pkt_dump       = 0;
 int copy_ts           = 0;
@@ -3299,6 +3300,10 @@ int ffmpeg_parse_options(int argc, char **argv)
         av_profiling_set(do_profiling_all);
     }
 
+    if (load_balance) {
+        av_load_balance_set(load_balance);
+    }
+
 fail:
     uninit_parse_context(&octx);
     if (ret < 0) {
@@ -3403,6 +3408,8 @@ const OptionDef options[] = {
       "add timings for each task" },
     { "profiling_all",  OPT_BOOL | OPT_EXPERT,                       { &do_profiling_all },
       "print performance info based on all running pipelines" },
+    { "load_balance",   HAS_ARG | OPT_INT | OPT_EXPERT,              { &load_balance },
+      "enable the load balance, set the number of accumulated frames allowed" },
     { "progress",       HAS_ARG | OPT_EXPERT,                        { .func_arg = opt_progress },
       "write program-readable progress information", "url" },
     { "stdin",          OPT_BOOL | OPT_EXPERT,                       { &stdin_interaction },

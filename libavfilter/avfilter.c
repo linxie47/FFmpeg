@@ -279,6 +279,7 @@ int avfilter_config_links(AVFilterContext *filter)
 {
     int (*config_link)(AVFilterLink *);
     unsigned i;
+    int64_t tm_init = 0;
     int ret;
 
     for (i = 0; i < filter->nb_inputs; i ++) {
@@ -300,7 +301,6 @@ int avfilter_config_links(AVFilterContext *filter)
         case AVLINK_INIT:
             continue;
         case AVLINK_STARTINIT:
-            av_log(filter, AV_LOG_INFO, "circular filter chain detected\n");
             return 0;
         case AVLINK_UNINIT:
             link->init_state = AVLINK_STARTINIT;
@@ -366,13 +366,18 @@ int avfilter_config_links(AVFilterContext *filter)
                     return AVERROR(ENOMEM);
             }
 
-            if ((config_link = link->dstpad->config_props))
+            if ((config_link = link->dstpad->config_props)) {
+                if (av_profiling_get())
+                    tm_init = av_gettime();
                 if ((ret = config_link(link)) < 0) {
                     av_log(link->dst, AV_LOG_ERROR,
                            "Failed to configure input pad on %s\n",
                            link->dst->name);
                     return ret;
                 }
+                if (av_profiling_get())
+                    filter->init_working_time += av_gettime() - tm_init;
+            }
 
             link->init_state = AVLINK_INIT;
         }
@@ -761,7 +766,6 @@ static void free_link(AVFilterLink *link)
 void avfilter_free(AVFilterContext *filter)
 {
     int i;
-    int64_t frame_cnt = 0;
 
     if (!filter)
         return;
@@ -1022,7 +1026,7 @@ int avfilter_init_str(AVFilterContext *filter, const char *args)
         tm_init = av_gettime();
     ret = avfilter_init_dict(filter, &options);
     if (av_profiling_get())
-        filter->init_working_time = av_gettime() - tm_init;
+        filter->init_working_time += av_gettime() - tm_init;
 
     if (ret < 0)
         goto fail;

@@ -27,8 +27,23 @@ OBJS-$(HAVE_THREADS)                         += pthread.o
 # subsystems
 OBJS-$(CONFIG_QSVVPP)                        += qsvvpp.o
 DNN-OBJS-$(CONFIG_LIBTENSORFLOW)             += dnn_backend_tf.o
-DNN-OBJS-$(CONFIG_LIBINFERENCE_ENGINE)       += dnn_backend_intel_ie.o inference.o
 OBJS-$(CONFIG_DNN)                           += dnn_interface.o dnn_backend_native.o $(DNN-OBJS-yes)
+OBJS-$(CONFIG_IMAGE_INFERENCE)               += inference_backend/ff_base_inference.o             \
+                                                inference_backend/ff_inference_impl.o             \
+                                                inference_backend/ff_list.o                       \
+                                                inference_backend/ff_proc_factory.o               \
+                                                inference_backend/image.o                         \
+                                                inference_backend/image_inference.o               \
+                                                inference_backend/image_inference_async_preproc.o \
+                                                inference_backend/logger.o                        \
+                                                inference_backend/model_proc.o                    \
+                                                inference_backend/openvino_image_inference.o      \
+                                                inference_backend/pre_proc.o                      \
+                                                inference_backend/pre_proc_mocker.o               \
+                                                inference_backend/pre_proc_swscale.o              \
+                                                inference_backend/pre_proc_vaapi.o                \
+                                                inference_backend/safe_queue.o                    \
+                                                inference_backend/metaconverter.o                 \
 
 # audio filters
 OBJS-$(CONFIG_ABENCH_FILTER)                 += f_bench.o
@@ -258,10 +273,10 @@ OBJS-$(CONFIG_HWUPLOAD_FILTER)               += vf_hwupload.o
 OBJS-$(CONFIG_HYSTERESIS_FILTER)             += vf_hysteresis.o framesync.o
 OBJS-$(CONFIG_IDET_FILTER)                   += vf_idet.o
 OBJS-$(CONFIG_IL_FILTER)                     += vf_il.o
-OBJS-$(CONFIG_INFERENCE_CLASSIFY_FILTER)     += vf_inference_classify.o
-OBJS-$(CONFIG_INFERENCE_DETECT_FILTER)       += vf_inference_detect.o
 OBJS-$(CONFIG_INFERENCE_IDENTIFY_FILTER)     += vf_inference_identify.o
 OBJS-$(CONFIG_INFERENCE_METACONVERT_FILTER)  += vf_inference_metaconvert.o
+OBJS-$(CONFIG_INFERENCE_CLASSIFY_FILTER)     += vf_inference_classify.o
+OBJS-$(CONFIG_INFERENCE_DETECT_FILTER)       += vf_inference_detect.o
 OBJS-$(CONFIG_INFLATE_FILTER)                += vf_neighbor.o
 OBJS-$(CONFIG_INTERLACE_FILTER)              += vf_tinterlace.o
 OBJS-$(CONFIG_INTERLEAVE_FILTER)             += f_interleave.o
@@ -297,6 +312,7 @@ OBJS-$(CONFIG_NORMALIZE_FILTER)              += vf_normalize.o
 OBJS-$(CONFIG_NULL_FILTER)                   += vf_null.o
 OBJS-$(CONFIG_OCR_FILTER)                    += vf_ocr.o
 OBJS-$(CONFIG_OCV_FILTER)                    += vf_libopencv.o
+OBJS-$(CONFIG_OCV_OVERLAY_FILTER)            += vf_ocv_overlay.o
 OBJS-$(CONFIG_OSCILLOSCOPE_FILTER)           += vf_datascope.o
 OBJS-$(CONFIG_OVERLAY_FILTER)                += vf_overlay.o framesync.o
 OBJS-$(CONFIG_OVERLAY_OPENCL_FILTER)         += vf_overlay_opencl.o opencl.o \
@@ -480,6 +496,7 @@ TOOLS-$(CONFIG_LIBZMQ) += zmqsend
 
 clean::
 	$(RM) $(CLEANSUFFIXES:%=libavfilter/libmpcodecs/%)
+	$(RM) $(CLEANSUFFIXES:%=libavfilter/inference_backend/%)
 
 OPENCL = $(subst $(SRC_PATH)/,,$(wildcard $(SRC_PATH)/libavfilter/opencl/*.cl))
 .SECONDARY: $(OPENCL:.cl=.c)
