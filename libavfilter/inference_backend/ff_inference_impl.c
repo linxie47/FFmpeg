@@ -102,11 +102,12 @@ static inline int avFormatToFourCC(int format) {
     case AV_PIX_FMT_BGR24:
         VAII_DEBUG("AV_PIX_FMT_BGR24");
         return FOURCC_BGR;
-// #if VA_MAJOR_VERSION >= 1
+    case AV_PIX_FMT_RGBP:
+        VAII_DEBUG("AV_PIX_FMT_RGBP");
+        return FOURCC_RGBP;
     case AV_PIX_FMT_YUV420P:
         VAII_DEBUG("AV_PIX_FMT_YUV420P");
         return FOURCC_I420;
-// #endif
     }
 
     av_log(NULL, AV_LOG_ERROR, "Unsupported AV Format: %d.", format);
@@ -398,9 +399,18 @@ int FFInferenceImplAddFrame(void *ctx, FFInferenceImpl *impl, AVFrame *frame) {
 output:
     // push into output_frames queue
     {
-        OutputFrame *output_frame = (OutputFrame *)av_malloc(sizeof(*output_frame));
+        OutputFrame *output_frame;
+        ff_list_t *output = impl->output_frames;
+        ff_list_t *processed = impl->processed_frames;
         pthread_mutex_lock(&impl->output_frames_mutex);
 
+        if (!run_inference && output->empty(output)) {
+            processed->push_back(processed, frame);
+            pthread_mutex_unlock(&impl->output_frames_mutex);
+            goto exit;
+        }
+
+        output_frame = (OutputFrame *)av_malloc(sizeof(*output_frame));
         output_frame->frame = frame;
         output_frame->writable_frame = NULL; // TODO: alloc new frame if not writable
         output_frame->inference_count = run_inference ? inference_count : 0;

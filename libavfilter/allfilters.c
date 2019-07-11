@@ -248,6 +248,8 @@ extern AVFilter ff_vf_inference_classify;
 extern AVFilter ff_vf_inference_detect;
 extern AVFilter ff_vf_inference_identify;
 extern AVFilter ff_vf_inference_metaconvert;
+extern AVFilter ff_vf_ie_classify;
+extern AVFilter ff_vf_ie_detect;
 extern AVFilter ff_vf_inflate;
 extern AVFilter ff_vf_interlace;
 extern AVFilter ff_vf_interleave;

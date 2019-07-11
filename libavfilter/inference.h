@@ -31,11 +31,9 @@
 #endif
 
 #include "dnn_interface.h"
+#include "inference_backend/ff_base_inference.h"
 
 typedef struct _InferenceBaseContext InferenceBaseContext;
-typedef struct _InputPreproc         ModelInputPreproc;
-typedef struct _OutputPostproc       OutputPostproc;
-typedef struct _ModelOutputPostproc  ModelOutputPostproc;
 
 typedef int (*InferencePreProcess)(InferenceBaseContext *base, int index, AVFrame *in, AVFrame **out);
 
@@ -128,28 +126,6 @@ typedef struct VideoPP {
 #endif
 } VideoPP;
 
-struct _InputPreproc {
-    int   color_format;     ///<! input data format
-    char *layer_name;       ///<! layer name of input
-    char *object_class;     ///<! interested object class
-};
-
-struct _OutputPostproc {
-    char  *layer_name;
-    char  *converter;
-    char  *attribute_name;
-    char  *method;
-    double threshold;
-    double tensor2text_scale;
-    int    tensor2text_precision;
-    AVBufferRef *labels;
-};
-
-#define MAX_MODEL_OUTPUT 4
-struct _ModelOutputPostproc {
-    OutputPostproc procs[MAX_MODEL_OUTPUT];
-};
-
 #define MAX_TENSOR_DIM_NUM 4
 typedef struct InferTensorMeta {
     size_t  dim_size;
@@ -162,33 +138,6 @@ typedef struct InferTensorMeta {
     size_t  total_bytes;
     // AVBufferRef *labels;
 } InferTensorMeta;
-
-typedef struct InferDetection {
-    float   x_min;
-    float   y_min;
-    float   x_max;
-    float   y_max;
-    float   confidence;
-    int     label_id;
-    int     object_id;
-    AVBufferRef *label_buf;
-} InferDetection;
-
-/* dynamic bounding boxes array */
-typedef struct BBoxesArray {
-    InferDetection **bbox;
-    int              num;
-} BBoxesArray;
-
-/* dynamic labels array */
-typedef struct LabelsArray {
-    char **label;
-    int    num;
-} LabelsArray;
-
-typedef struct InferDetectionMeta {
-    BBoxesArray *bboxes;
-} InferDetectionMeta;
 
 typedef struct InferClassification {
     int     detect_id;        ///< detected bbox index
