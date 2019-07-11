@@ -240,6 +240,7 @@ External library support:
   --enable-libilbc         enable iLBC de/encoding via libilbc [no]
   --enable-libinference_engine enable intel inference engine as a DNN module
                                backend [no]
+  --enable-libinference_engine_c_api enable dldt inference engine c api [no]
   --enable-libjack         enable JACK audio sound server [no]
   --enable-libjson_c       enable libjson-c [no]
   --enable-libklvanc       enable Kernel Labs VANC processing [no]
@@ -1727,6 +1728,7 @@ EXTERNAL_LIBRARY_LIST="
     libiec61883
     libilbc
     libinference_engine
+    libinference_engine_c_api
     libjack
     libjson_c
     libklvanc
@@ -2309,6 +2311,7 @@ CONFIG_EXTRA="
     huffyuvdsp
     huffyuvencdsp
     idctdsp
+    image_inference
     iirfilter
     mdct15
     intrax8
@@ -2552,6 +2555,7 @@ cbs_vp9_select="cbs"
 dct_select="rdft"
 dirac_parse_select="golomb"
 dnn_suggest="libtensorflow libinference_engine"
+image_inference_suggest="libinference_engine_c_api"
 error_resilience_select="me_cmp"
 faandct_deps="faan"
 faandct_select="fdctdsp"
@@ -6261,6 +6265,9 @@ enabled libinference_engine &&
 enabled librdkafka  && require_pkg_config librdkafka rdkafka "librdkafka/rdkafka.h" rd_kafka_version
 
 enabled libjson_c && check_pkg_config libjson_c json-c json-c/json.h json_c_version
+
+enabled libinference_engine_c_api &&
+    require_pkg_config libinference_engine_c_api dldt_c_api "ie_c_api.h" ie_c_api_version
 
 if enabled gcrypt; then
     GCRYPT_CONFIG="${cross_prefix}libgcrypt-config"

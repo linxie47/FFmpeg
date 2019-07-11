@@ -29,6 +29,16 @@ OBJS-$(CONFIG_QSVVPP)                        += qsvvpp.o
 DNN-OBJS-$(CONFIG_LIBTENSORFLOW)             += dnn_backend_tf.o
 DNN-OBJS-$(CONFIG_LIBINFERENCE_ENGINE)       += dnn_backend_intel_ie.o inference.o
 OBJS-$(CONFIG_DNN)                           += dnn_interface.o dnn_backend_native.o $(DNN-OBJS-yes)
+OBJS-$(CONFIG_IMAGE_INFERENCE)               += inference_backend/ff_base_inference.o        \
+                                                inference_backend/ff_inference_impl.o        \
+                                                inference_backend/ff_list.o                  \
+                                                inference_backend/ff_pre_proc.o              \
+                                                inference_backend/ff_proc_factory.o          \
+                                                inference_backend/image_inference.o          \
+                                                inference_backend/logger.o                   \
+                                                inference_backend/openvino_image_inference.o \
+                                                inference_backend/pre_proc.o                 \
+                                                inference_backend/safe_queue.o               \
 
 # audio filters
 OBJS-$(CONFIG_ABENCH_FILTER)                 += f_bench.o
