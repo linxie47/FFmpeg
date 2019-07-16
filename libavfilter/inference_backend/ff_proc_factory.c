@@ -25,6 +25,49 @@ static void infer_detect_metadata_buffer_free(void *opaque, uint8_t *data) {
     av_free(data);
 }
 
+static void infer_classify_metadata_buffer_free(void *opaque, uint8_t *data) {
+    int i;
+    InferClassificationMeta *meta = (InferClassificationMeta *)data;
+    ClassifyArray *classes = meta->c_array;
+
+    if (classes) {
+        for (i = 0; i < classes->num; i++) {
+            InferClassification *c = classes->classifications[i];
+            av_buffer_unref(&c->label_buf);
+            av_buffer_unref(&c->tensor_buf);
+            av_freep(&c);
+        }
+        av_free(classes->classifications);
+        av_freep(&classes);
+    }
+
+    av_free(data);
+}
+
+static int get_unbatched_size_in_bytes(OutputBlobContext *blob_ctx, size_t batch_size) {
+    const OutputBlobMethod *blob = blob_ctx->output_blob_method;
+    size_t size;
+    Dimensions *dim = blob->GetDims(blob_ctx);
+
+    if (dim->dims[0] != batch_size) {
+        av_log(NULL, AV_LOG_ERROR, "Blob last dimension should be equal to batch size");
+        av_assert0(0);
+    }
+    size = dim->dims[1];
+    for (int i = 2; i < dim->num_dims; i++) {
+        size *= dim->dims[i];
+    }
+    switch (blob->GetPrecision(blob_ctx)) {
+    case II_FP32:
+        size *= sizeof(float);
+        break;
+    case II_U8:
+    default:
+        break;
+    }
+    return size;
+}
+
 static void ExtractBoundingBoxes(const OutputBlobArray *blob_array, InferenceROIArray *infer_roi_array,
                                  ModelOutputPostproc *model_postproc, const char *model_name,
                                  const FFBaseInference *ff_base_inference) {
@@ -152,9 +195,223 @@ static void ExtractBoundingBoxes(const OutputBlobArray *blob_array, InferenceROI
     }
 }
 
-static void ExtractYOLOV3BoundingBoxes(const OutputBlobArray *output_blobs, InferenceROIArray *infer_roi_array,
+static void ExtractYOLOV3BoundingBoxes(const OutputBlobArray *blob_array, InferenceROIArray *infer_roi_array,
                                        ModelOutputPostproc *model_postproc, const char *model_name,
                                        const FFBaseInference *ff_base_inference) {
+}
+
+static int CreateNewClassifySideData(AVFrame *frame, InferClassificationMeta *classify_meta) {
+    AVBufferRef *ref;
+    AVFrameSideData *new_sd;
+    ref = av_buffer_create((uint8_t *)classify_meta, sizeof(*classify_meta), &infer_classify_metadata_buffer_free, NULL,
+                           0);
+    if (!ref)
+        return AVERROR(ENOMEM);
+
+    // add meta data to side data
+    new_sd = av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_INFERENCE_CLASSIFICATION, ref);
+    if (!new_sd) {
+        av_buffer_unref(&ref);
+        av_log(NULL, AV_LOG_ERROR, "Could not add new side data\n");
+        return AVERROR(ENOMEM);
+    }
+
+    return 0;
+}
+
+static av_cold void dump_softmax(char *name, int label_id, float conf, AVBufferRef *label_buf) {
+    LabelsArray *array = (LabelsArray *)label_buf->data;
+
+    av_log(NULL, AV_LOG_DEBUG, "CLASSIFY META - Label id:%d %s:%s Conf:%f\n", label_id, name, array->label[label_id],
+           conf);
+}
+
+static av_cold void dump_tensor_value(char *name, float value) {
+    av_log(NULL, AV_LOG_DEBUG, "CLASSIFY META - %s:%1.2f\n", name, value);
+}
+
+static void find_max_element_index(const float *array, int len, int *index, float *value) {
+    int i;
+    *index = 0;
+    *value = array[0];
+    for (i = 1; i < len; i++) {
+        if (array[i] > *value) {
+            *index = i;
+            *value = array[i];
+        }
+    }
+}
+
+static int attributes_to_text(FFVideoRegionOfInterestMeta *meta, OutputPostproc *post_proc, void *data, Dimensions *dim,
+                              InferClassification *classification, InferClassificationMeta *classify_meta) {
+    const float *blob_data = (const float *)data;
+    uint32_t method_max, method_compound, method_index;
+
+    method_max = !strcmp(post_proc->method, "max");
+    method_compound = !strcmp(post_proc->method, "compound");
+    method_index = !strcmp(post_proc->method, "index");
+
+    if (!blob_data)
+        return -1;
+
+    if (method_max) {
+        int index;
+        float confidence;
+        size_t n = dim->dims[1];
+
+        find_max_element_index(data, n, &index, &confidence);
+
+        classification->detect_id = meta->index;
+        classification->name = post_proc->attribute_name;
+        classification->label_id = index;
+        classification->confidence = confidence;
+        classification->label_buf = av_buffer_ref(post_proc->labels);
+
+        if (classification->label_buf) {
+            dump_softmax(classification->name, classification->label_id, classification->confidence,
+                         classification->label_buf);
+        }
+    } else if (method_compound) {
+        int i;
+        double threshold = 0.5;
+        float confidence = 0;
+        char attributes[4096] = {};
+        LabelsArray *array;
+
+        if (post_proc->threshold != 0)
+            threshold = post_proc->threshold;
+
+        array = (LabelsArray *)post_proc->labels->data;
+        for (i = 0; i < array->num; i++) {
+            if (blob_data[i] >= threshold)
+                strncat(attributes, array->label[i], (strlen(array->label[i]) + 1));
+            if (blob_data[i] > confidence)
+                confidence = blob_data[i];
+        }
+
+        classification->name = post_proc->attribute_name;
+        classification->confidence = confidence;
+
+        av_log(NULL, AV_LOG_DEBUG, "Attributes: %s\n", attributes);
+    } else if (method_index) {
+        int i;
+        char attributes[1024] = {};
+        LabelsArray *array;
+
+        array = (LabelsArray *)post_proc->labels->data;
+        for (i = 0; i < array->num; i++) {
+            int value = blob_data[i];
+            if (value < 0 || value >= array->num)
+                break;
+            strncat(attributes, array->label[value], (strlen(array->label[value]) + 1));
+        }
+
+        classification->name = post_proc->attribute_name;
+
+        av_log(NULL, AV_LOG_DEBUG, "Attributes: %s\n", attributes);
+    }
+
+    return 0;
+}
+
+static int tensor_to_text(FFVideoRegionOfInterestMeta *meta, OutputPostproc *post_proc, void *data, Dimensions *dim,
+                          InferClassification *classification, InferClassificationMeta *classify_meta) {
+    // InferClassification *classify;
+    const float *blob_data = (const float *)data;
+    double scale = 1.0;
+
+    if (!blob_data)
+        return -1;
+
+    if (post_proc->tensor2text_scale != 0)
+        scale = post_proc->tensor2text_scale;
+
+    classification->detect_id = meta->index;
+    classification->name = post_proc->attribute_name;
+    classification->value = *blob_data * scale;
+
+    dump_tensor_value(classification->name, classification->value);
+    return 0;
+}
+
+static void Blob2RoiMeta(const OutputBlobArray *blob_array, InferenceROIArray *infer_roi_array,
+                         ModelOutputPostproc *model_postproc, const char *model_name,
+                         const FFBaseInference *ff_base_inference) {
+    int batch_size = infer_roi_array->num_infer_ROIs;
+
+    for (int n = 0; n < blob_array->num_blobs; n++) {
+        OutputBlobContext *ctx = blob_array->output_blobs[n];
+        const OutputBlobMethod *blob;
+        const char *layer_name;
+        uint8_t *data = NULL;
+        int size;
+        OutputPostproc *post_proc = NULL;
+        Dimensions *dimensions = NULL;
+
+        av_assert0(ctx);
+
+        blob = ctx->output_blob_method;
+        layer_name = blob->GetOutputLayerName(ctx);
+        data = (uint8_t *)blob->GetData(ctx);
+        dimensions = blob->GetDims(ctx);
+        size = get_unbatched_size_in_bytes(ctx, batch_size);
+
+        if (model_postproc) {
+            int proc_idx = findModelPostProcByName(model_postproc, layer_name);
+            if (proc_idx != MAX_MODEL_OUTPUT)
+                post_proc = &model_postproc->procs[proc_idx];
+        }
+
+        for (int b = 0; b < batch_size; b++) {
+            FFVideoRegionOfInterestMeta *meta = &infer_roi_array->infer_ROIs[b]->roi;
+            AVFrame *av_frame = infer_roi_array->infer_ROIs[b]->frame;
+            AVFrameSideData *sd = NULL;
+            InferClassificationMeta *classify_meta = NULL;
+            InferClassification *classification = NULL;
+
+            sd = av_frame_get_side_data(av_frame, AV_FRAME_DATA_INFERENCE_CLASSIFICATION);
+            if (sd) {
+                // append to exsiting side data
+                classify_meta = (InferClassificationMeta *)sd->data;
+                av_assert0(classify_meta);
+            } else {
+                ClassifyArray *classify_array = NULL;
+                // new classification meta data
+                classify_meta = av_mallocz(sizeof(*classify_meta));
+                classify_array = av_mallocz(sizeof(*classify_array));
+                av_assert0(classify_meta && classify_array);
+                classify_meta->c_array = classify_array;
+                av_assert0(0 == CreateNewClassifySideData(av_frame, classify_meta));
+            }
+
+            classification = av_mallocz(sizeof(*classification));
+            av_assert0(classification);
+            classification->layer_name = (char *)layer_name;
+            classification->model = (char *)model_name;
+
+            if (post_proc && post_proc->converter) {
+                if (!strcmp(post_proc->converter, "attributes")) {
+                    attributes_to_text(meta, post_proc, (void *)(data + b * size), dimensions, classification,
+                                       classify_meta);
+                } else if (!strcmp(post_proc->converter, "tensor2text")) {
+                    tensor_to_text(meta, post_proc, (void *)(data + b * size), dimensions, classification,
+                                   classify_meta);
+                } else {
+                    av_log(NULL, AV_LOG_ERROR, "Undefined converter:%s\n", post_proc->converter);
+                    break;
+                }
+            } else {
+                // copy data to tensor buffer
+                classification->detect_id = meta->index;
+                classification->name = (char *)"default";
+                classification->tensor_buf = av_buffer_alloc(size);
+                av_assert0(classification->tensor_buf);
+                memcpy(classification->tensor_buf->data, data + b * size, size);
+            }
+
+            av_dynarray_add(&classify_meta->c_array->classifications, &classify_meta->c_array->num, classification);
+        }
+    }
 }
 
 PostProcFunction getPostProcFunctionByName(const char *name, const char *model) {
@@ -166,6 +423,8 @@ PostProcFunction getPostProcFunctionByName(const char *name, const char *model) 
             return (PostProcFunction)ExtractYOLOV3BoundingBoxes;
         else
             return (PostProcFunction)ExtractBoundingBoxes;
+    } else if (!strcmp(name, "ie_classify")) {
+        return (PostProcFunction)Blob2RoiMeta;
     }
     return NULL;
 }

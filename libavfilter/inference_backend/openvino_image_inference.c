@@ -48,7 +48,7 @@ static void GetNextImageBuffer(ImageInferenceContext *ctx, const BatchRequest *r
     batchIndex = request->buffers.num_buffers;
     plane_size = image->width * image->height;
     image->planes[0] = (uint8_t *)infer_request_get_blob_data(request->infer_request, input_name) +
-                       batchIndex * plane_size * blob_dims.dims[2];
+                       batchIndex * plane_size * blob_dims.dims[1];
     image->planes[1] = image->planes[0] + plane_size;
     image->planes[2] = image->planes[1] + plane_size;
     image->stride[0] = image->width;
@@ -196,6 +196,7 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
     }
 
     ie_network_set_batch(vino->network, batch_size);
+    vino->batch_size = batch_size;
 
     // Check model input
     vino->num_inputs = ie_network_get_input_number(vino->network);
@@ -354,7 +355,7 @@ static void OpenVINOImageInferenceSubmtImage(ImageInferenceContext *ctx, const I
         infer_request_infer_async(request->infer_request);
         SafeQueuePush(vino->workingRequests, request);
     } else {
-        SafeQueuePushFront(vino->workingRequests, request);
+        SafeQueuePushFront(vino->freeRequests, request);
     }
 }
 
@@ -478,7 +479,7 @@ static void *WorkingFunction(void *arg) {
             blob_array.num_blobs = 0;
             free(blob_array.output_blobs);
         } else {
-            fprintf(stderr, "Inference Error: %d", sts);
+            fprintf(stderr, "Inference Error: %d model: %s\n", sts, vino->model_name);
             assert(0);
         }
 

@@ -139,28 +139,6 @@ typedef struct InferTensorMeta {
     // AVBufferRef *labels;
 } InferTensorMeta;
 
-typedef struct InferClassification {
-    int     detect_id;        ///< detected bbox index
-    char   *name;             ///< class name, e.g. emotion, age
-    char   *layer_name;       ///< output layer name
-    char   *model;            ///< model name
-    int     label_id;         ///< label index in labels
-    float   confidence;
-    float   value;
-    AVBufferRef *label_buf;   ///< label buffer
-    AVBufferRef *tensor_buf;  ///< output tensor buffer
-} InferClassification;
-
-/* dynamic classifications array */
-typedef struct ClassifyArray {
-    InferClassification **classifications;
-    int                   num;
-} ClassifyArray;
-
-typedef struct InferClassificationMeta {
-    ClassifyArray *c_array;
-} InferClassificationMeta;
-
 /* split strings by delimiter */
 void av_split(char *str, const char *delim, char **array, int *num, int max);
 
