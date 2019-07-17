@@ -91,6 +91,7 @@ static av_cold int classify_init(AVFilterContext *ctx)
     param.every_nth_frame = s->every_nth_frame;
     param.threshold       = s->threshold;
     param.is_full_frame   = 0;
+    param.infer_config    = s->infer_config;
 
     // Parse model process configuration
     if (s->model_proc) {
