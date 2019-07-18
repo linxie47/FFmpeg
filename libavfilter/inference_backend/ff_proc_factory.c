@@ -6,6 +6,7 @@
 
 #include "ff_proc_factory.h"
 #include <libavutil/avassert.h>
+#include <math.h>
 
 static void infer_detect_metadata_buffer_free(void *opaque, uint8_t *data) {
     BBoxesArray *bboxes = ((InferDetectionMeta *)data)->bboxes;
@@ -66,6 +67,202 @@ static int get_unbatched_size_in_bytes(OutputBlobContext *blob_ctx, size_t batch
         break;
     }
     return size;
+}
+
+typedef struct DetectionObject {
+    int xmin, ymin, xmax, ymax, class_id;
+    float confidence;
+} DetectionObject;
+
+typedef struct DetectionObjectArray {
+    DetectionObject **objects;
+    int num_detection_objects;
+} DetectionObjectArray;
+
+static void DetectionObjectInit(DetectionObject *this, double x, double y, double h, double w, int class_id,
+                                float confidence, float h_scale, float w_scale) {
+    this->xmin = (int)((x - w / 2) * w_scale);
+    this->ymin = (int)((y - h / 2) * h_scale);
+    this->xmax = (int)(this->xmin + w * w_scale);
+    this->ymax = (int)(this->ymin + h * h_scale);
+    this->class_id = class_id;
+    this->confidence = confidence;
+}
+
+static int DetectionObjectCompare(const void *p1, const void *p2) {
+    return (*(DetectionObject **)p1)->confidence > (*(DetectionObject **)p2)->confidence ? 1 : -1;
+}
+
+static double IntersectionOverUnion(const DetectionObject *box_1, const DetectionObject *box_2) {
+    double width_of_overlap_area = fmin(box_1->xmax, box_2->xmax) - fmax(box_1->xmin, box_2->xmin);
+    double height_of_overlap_area = fmin(box_1->ymax, box_2->ymax) - fmax(box_1->ymin, box_2->ymin);
+    double area_of_overlap, area_of_union;
+    double box_1_area = (box_1->ymax - box_1->ymin) * (box_1->xmax - box_1->xmin);
+    double box_2_area = (box_2->ymax - box_2->ymin) * (box_2->xmax - box_2->xmin);
+
+    if (width_of_overlap_area < 0 || height_of_overlap_area < 0)
+        area_of_overlap = 0;
+    else
+        area_of_overlap = width_of_overlap_area * height_of_overlap_area;
+    area_of_union = box_1_area + box_2_area - area_of_overlap;
+    return area_of_overlap / area_of_union;
+}
+
+static int EntryIndex(int side, int lcoords, int lclasses, int location, int entry) {
+    int n = location / (side * side);
+    int loc = location % (side * side);
+    return n * side * side * (lcoords + lclasses + 1) + entry * side * side + loc;
+}
+
+#define YOLOV3_INPUT_SIZE 320 // TODO: add interface to get this info
+
+static void ParseYOLOV3Output(OutputBlobContext *blob_ctx, int image_width, int image_height,
+                              DetectionObjectArray *objects, const FFBaseInference *base) {
+    const OutputBlobMethod *blob = blob_ctx->output_blob_method;
+    Dimensions *dim = blob->GetDims(blob_ctx);
+    const int out_blob_h = (int)dim->dims[2];
+    const int out_blob_w = (int)dim->dims[3];
+    const int coords = 4, num = 3, classes = 80;
+    const float anchors[] = {10.0, 13.0, 16.0,  30.0,  33.0, 23.0,  30.0,  61.0,  62.0,
+                             45.0, 59.0, 119.0, 116.0, 90.0, 156.0, 198.0, 373.0, 326.0};
+    int side = out_blob_h;
+    int anchor_offset = 0;
+    int side_square = side * side;
+    const float *output_blob = (const float *)blob->GetData(blob_ctx);
+
+    av_assert0(out_blob_h == out_blob_w);
+    switch (side) {
+    case 13:
+    case 10:
+    case 19:
+        anchor_offset = 2 * 6;
+        break;
+    case 26:
+    case 20:
+    case 38:
+        anchor_offset = 2 * 3;
+        break;
+    case 52:
+    case 40:
+    case 76:
+        anchor_offset = 2 * 0;
+        break;
+    default:
+        av_log(NULL, AV_LOG_ERROR, "Invalid output size\n");
+        return;
+    }
+    for (int i = 0; i < side_square; ++i) {
+        int row = i / side;
+        int col = i % side;
+        for (int n = 0; n < num; ++n) {
+            int obj_index = EntryIndex(side, coords, classes, n * side * side + i, coords);
+            int box_index = EntryIndex(side, coords, classes, n * side * side + i, 0);
+            double x, y, width, height;
+
+            float scale = output_blob[obj_index];
+            float threshold = base->param.threshold;
+            if (scale < threshold)
+                continue;
+
+            x = (col + output_blob[box_index + 0 * side_square]) / side * YOLOV3_INPUT_SIZE;
+            y = (row + output_blob[box_index + 1 * side_square]) / side * YOLOV3_INPUT_SIZE;
+            width = exp(output_blob[box_index + 2 * side_square]) * anchors[anchor_offset + 2 * n];
+            height = exp(output_blob[box_index + 3 * side_square]) * anchors[anchor_offset + 2 * n + 1];
+
+            for (int j = 0; j < classes; ++j) {
+                int class_index = EntryIndex(side, coords, classes, n * side_square + i, coords + 1 + j);
+                float prob = scale * output_blob[class_index];
+                DetectionObject *obj = NULL;
+                if (prob < threshold)
+                    continue;
+                obj = av_mallocz(sizeof(*obj));
+                av_assert0(obj);
+                DetectionObjectInit(obj, x, y, height, width, j, prob,
+                                    (float)(image_height) / (float)(YOLOV3_INPUT_SIZE),
+                                    (float)(image_width) / (float)(YOLOV3_INPUT_SIZE));
+                av_dynarray_add(&objects->objects, &objects->num_detection_objects, obj);
+            }
+        }
+    }
+}
+
+static void ExtractYOLOV3BoundingBoxes(const OutputBlobArray *blob_array, InferenceROIArray *infer_roi_array,
+                                       ModelOutputPostproc *model_postproc, const char *model_name,
+                                       const FFBaseInference *ff_base_inference) {
+    DetectionObjectArray obj_array = {};
+    BBoxesArray *boxes;
+    AVBufferRef *ref;
+    AVFrame *av_frame;
+    AVFrameSideData *side_data;
+    InferDetectionMeta *detect_meta;
+
+    av_assert0(blob_array->num_blobs == 3);           // This accepts networks with three layers
+    av_assert0(infer_roi_array->num_infer_ROIs == 1); // YoloV3 cannot support batch mode
+
+    for (int n = 0; n < blob_array->num_blobs; n++) {
+        OutputBlobContext *blob_ctx = blob_array->output_blobs[n];
+        av_assert0(blob_ctx);
+        ParseYOLOV3Output(blob_ctx, infer_roi_array->infer_ROIs[0]->roi.w, infer_roi_array->infer_ROIs[0]->roi.h,
+                          &obj_array, ff_base_inference);
+    }
+
+    qsort(obj_array.objects, obj_array.num_detection_objects, sizeof(DetectionObject *), DetectionObjectCompare);
+    for (int i = 0; i < obj_array.num_detection_objects; ++i) {
+        DetectionObjectArray *d = &obj_array;
+        if (d->objects[i]->confidence == 0)
+            continue;
+        for (int j = i + 1; j < d->num_detection_objects; ++j)
+            if (IntersectionOverUnion(d->objects[i], d->objects[j]) >= 0.4)
+                d->objects[j]->confidence = 0;
+    }
+
+    boxes = av_mallocz(sizeof(*boxes));
+    av_assert0(boxes);
+
+    for (int i = 0; i < obj_array.num_detection_objects; ++i) {
+        InferDetection *new_bbox = NULL;
+        DetectionObject *object = obj_array.objects[i];
+        if (object->confidence < ff_base_inference->param.threshold)
+            continue;
+
+        new_bbox = (InferDetection *)av_mallocz(sizeof(*new_bbox));
+        av_assert0(new_bbox);
+
+        new_bbox->x_min = object->xmin;
+        new_bbox->y_min = object->ymin;
+        new_bbox->x_max = object->xmax;
+        new_bbox->y_max = object->ymax;
+        new_bbox->confidence = object->confidence;
+        new_bbox->label_id = object->class_id;
+
+        //// TODO: handle label
+        // if (labels)
+
+        av_dynarray_add(&boxes->bbox, &boxes->num, new_bbox);
+        av_log(NULL, AV_LOG_TRACE, "bbox %d %d %d %d\n", (int)new_bbox->x_min, (int)new_bbox->y_min,
+               (int)new_bbox->x_max, (int)new_bbox->y_max);
+    }
+
+    detect_meta = av_mallocz(sizeof(*detect_meta));
+    av_assert0(detect_meta);
+    detect_meta->bboxes = boxes;
+
+    ref = av_buffer_create((uint8_t *)detect_meta, sizeof(*detect_meta), &infer_detect_metadata_buffer_free, NULL, 0);
+    if (!ref) {
+        infer_detect_metadata_buffer_free(NULL, (uint8_t *)detect_meta);
+        av_log(NULL, AV_LOG_ERROR, "Create buffer ref failed.\n");
+        av_assert0(0);
+    }
+
+    av_frame = infer_roi_array->infer_ROIs[0]->frame;
+    // add meta data to side data
+    side_data = av_frame_new_side_data_from_buf(av_frame, AV_FRAME_DATA_INFERENCE_DETECTION, ref);
+    av_assert0(side_data);
+
+    // free all detection objects
+    for (int n = 0; n < obj_array.num_detection_objects; n++)
+        av_free(obj_array.objects[n]);
+    av_free(obj_array.objects);
 }
 
 static void ExtractBoundingBoxes(const OutputBlobArray *blob_array, InferenceROIArray *infer_roi_array,
@@ -193,11 +390,6 @@ static void ExtractBoundingBoxes(const OutputBlobArray *blob_array, InferenceROI
 
         av_free(boxes);
     }
-}
-
-static void ExtractYOLOV3BoundingBoxes(const OutputBlobArray *blob_array, InferenceROIArray *infer_roi_array,
-                                       ModelOutputPostproc *model_postproc, const char *model_name,
-                                       const FFBaseInference *ff_base_inference) {
 }
 
 static int CreateNewClassifySideData(AVFrame *frame, InferClassificationMeta *classify_meta) {

@@ -293,7 +293,7 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
     return 0;
 err:
     if (vino->inputs) {
-        for (size_t i = 0; i < vino->num_outputs; i++)
+        for (size_t i = 0; i < vino->num_inputs; i++)
             if (vino->inputs[i])
                 free(vino->inputs[i]);
         free(vino->inputs);
@@ -404,18 +404,6 @@ static void OpenVINOImageInferenceClose(ImageInferenceContext *ctx) {
         pthread_join(vino->working_thread, NULL);
     }
 
-    if (vino->inputs) {
-        for (size_t i = 0; i < vino->num_outputs; i++)
-            if (vino->inputs[i])
-                free(vino->inputs[i]);
-        free(vino->inputs);
-    }
-    if (vino->outputs) {
-        for (size_t i = 0; i < vino->num_outputs; i++)
-            if (vino->outputs[i])
-                free(vino->outputs[i]);
-        free(vino->outputs);
-    }
     if (vino->batch_requests) {
         for (size_t i = 0; i < vino->num_batch_requests; i++)
             if (vino->batch_requests[i])
@@ -426,8 +414,6 @@ static void OpenVINOImageInferenceClose(ImageInferenceContext *ctx) {
         SafeQueueDestroy(vino->freeRequests);
     if (vino->workingRequests)
         SafeQueueDestroy(vino->workingRequests);
-    ie_network_destroy(vino->network);
-    ie_plugin_destroy(vino->plugin);
 
     if (vino->model_name)
         free(vino->model_name);
@@ -438,6 +424,22 @@ static void OpenVINOImageInferenceClose(ImageInferenceContext *ctx) {
         vino->vpp_ctx->pre_proc->Destroy(vino->vpp_ctx);
         pre_proc_free(vino->vpp_ctx);
     }
+
+    if (vino->inputs) {
+        for (size_t i = 0; i < vino->num_inputs; i++)
+            if (vino->inputs[i])
+                free(vino->inputs[i]);
+        free(vino->inputs);
+    }
+    if (vino->outputs) {
+        for (size_t i = 0; i < vino->num_outputs; i++)
+            if (vino->outputs[i])
+                free(vino->outputs[i]);
+        free(vino->outputs);
+    }
+
+    ie_network_destroy(vino->network);
+    ie_plugin_destroy(vino->plugin);
 }
 
 static void *WorkingFunction(void *arg) {
