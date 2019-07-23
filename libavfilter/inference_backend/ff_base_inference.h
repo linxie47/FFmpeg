@@ -43,7 +43,8 @@ typedef struct __ModelOutputPostproc ModelOutputPostproc;
     int nireq;                                                                                                         \
     char *cpu_streams;                                                                                                 \
     char *infer_config;                                                                                                \
-    float threshold;
+    float threshold;                                                                                                   \
+    int realtime_qos;
 
 struct __FFInferenceParam {
     // exposed options
@@ -64,6 +65,8 @@ struct __FFBaseInference {
     void *pre_proc;         // type: PreProcFunction
     void *post_proc;        // type: PostProcFunction
     void *get_roi_pre_proc; // type: GetROIPreProcFunction
+
+    unsigned int num_skipped_frames;
 };
 
 /* ROI for analytics */

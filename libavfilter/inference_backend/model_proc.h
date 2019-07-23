@@ -1,5 +1,11 @@
-#include "libavutil/avassert.h"
-#include <json-c/json.h>
+/*******************************************************************************
+ * Copyright (C) 2018-2019 Intel Corporation
+ *
+ * SPDX-License-Identifier: MIT
+ ******************************************************************************/
+
+#pragma once
+
 #include "ff_base_inference.h"
 
 #define UNUSED(x) (void)(x)

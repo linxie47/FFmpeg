@@ -41,6 +41,35 @@ static void DumpBGRpToFile(const Image *out_image) {
     fclose(fp);
 }
 
+static void DumpRGBpToFile(const Image *out_image) {
+    FILE *fp;
+    char file_name[256] = {};
+    static int dump_frame_num = 0;
+
+    sprintf(file_name, "ff_rgbp_source%03d.rgb", dump_frame_num++);
+    fp = fopen(file_name, "w+b");
+    assert(fp);
+
+    const uint8_t *b_channel = out_image->planes[2];
+    const uint8_t *g_channel = out_image->planes[1];
+    const uint8_t *r_channel = out_image->planes[0];
+
+    int size = out_image->height * out_image->width * 3;
+    uint8_t *data = (uint8_t *)malloc(size);
+    memset(data, 0, size);
+
+    for (int i = 0; i < out_image->height; i++) {
+        for (int j = 0; j < out_image->width; j++) {
+            data[3 * j + i * 3 * out_image->width] = r_channel[j + i * out_image->width];
+            data[3 * j + i * 3 * out_image->width + 1] = g_channel[j + i * out_image->width];
+            data[3 * j + i * 3 * out_image->width + 2] = b_channel[j + i * out_image->width];
+        }
+    }
+    fwrite(data, out_image->height * out_image->width * 3, 1, fp);
+    free(data);
+    fclose(fp);
+}
+
 static inline void DumpImageInfo(const Image *p) {
     av_log(NULL, AV_LOG_INFO, "Image w:%d h:%d f:%x, plane: %p %p %p  stride: %d %d %d \n", p->width, p->height,
            p->format, p->planes[0], p->planes[1], p->planes[2], p->stride[0], p->stride[1], p->stride[2]);

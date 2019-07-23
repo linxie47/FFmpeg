@@ -31,7 +31,7 @@ while getopts ':ab:hi:r:svd:' option; do
             exit
             ;;
         a) hw_accel="-flags unaligned -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128"
-           hw_dl="scale_vaapi=format=rgbp,hwdownload,format=rgbp,"
+           hw_dl="hwdownload,format=bgr0,"
             ;;
         i) stream=$OPTARG
             ;;

@@ -1,7 +1,14 @@
-#include "model_proc.h"
+/*******************************************************************************
+ * Copyright (C) 2018-2019 Intel Corporation
+ *
+ * SPDX-License-Identifier: MIT
+ ******************************************************************************/
 
-static void infer_labels_buffer_free(void *opaque, uint8_t *data)
-{
+#include "model_proc.h"
+#include "libavutil/avassert.h"
+#include <json-c/json.h>
+
+static void infer_labels_buffer_free(void *opaque, uint8_t *data) {
     int i;
     LabelsArray *labels = (LabelsArray *)data;
 
@@ -14,8 +21,7 @@ static void infer_labels_buffer_free(void *opaque, uint8_t *data)
 }
 
 // helper functions
-static void infer_labels_dump(uint8_t *data)
-{
+static void infer_labels_dump(uint8_t *data) {
     int i;
     LabelsArray *labels = (LabelsArray *)data;
     printf("labels: ");
@@ -24,8 +30,7 @@ static void infer_labels_dump(uint8_t *data)
     printf("\n");
 }
 
-int model_proc_get_file_size(FILE *fp)
-{
+int model_proc_get_file_size(FILE *fp) {
     int file_size, current_pos;
 
     if (!fp)
@@ -47,8 +52,7 @@ int model_proc_get_file_size(FILE *fp)
 /*
  * model proc parsing functions using JSON-c
  */
-void *model_proc_read_config_file(const char *path)
-{
+void *model_proc_read_config_file(const char *path) {
     int n, file_size;
     json_object *proc_config = NULL;
     uint8_t *proc_json = NULL;
@@ -82,14 +86,13 @@ void *model_proc_read_config_file(const char *path)
 end:
     if (proc_json)
         av_freep(&proc_json);
-    if(tok)
+    if (tok)
         json_tokener_free(tok);
     fclose(fp);
     return proc_config;
 }
 
-void model_proc_load_default_config_file(ModelInputPreproc *preproc, ModelOutputPostproc *postproc)
-{
+void model_proc_load_default_config_file(ModelInputPreproc *preproc, ModelOutputPostproc *postproc) {
     if (preproc) {
         /*
          * format is a little tricky, an ideal input format for IE is BGR planer
@@ -98,7 +101,7 @@ void model_proc_load_default_config_file(ModelInputPreproc *preproc, ModelOutput
          * to IE will be decided by user config and hardware vpp used or not.
          */
         preproc->color_format = AV_PIX_FMT_BGR24;
-        preproc->layer_name   = NULL;
+        preproc->layer_name = NULL;
     }
 
     if (postproc) {
@@ -106,8 +109,7 @@ void model_proc_load_default_config_file(ModelInputPreproc *preproc, ModelOutput
     }
 }
 
-int model_proc_parse_input_preproc(const void *json, ModelInputPreproc *m_preproc)
-{
+int model_proc_parse_input_preproc(const void *json, ModelInputPreproc *m_preproc) {
     json_object *jvalue, *preproc, *color, *layer, *object_class;
     int ret;
 
@@ -155,8 +157,7 @@ int model_proc_parse_input_preproc(const void *json, ModelInputPreproc *m_prepro
 
 // For detection, we now care labels only.
 // Layer name and type can be got from output blob.
-int model_proc_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
-{
+int model_proc_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc) {
     json_object *jvalue, *postproc;
     json_object *attribute, *converter, *labels, *layer, *method, *threshold;
     json_object *tensor2text_scale, *tensor2text_precision;
@@ -172,22 +173,28 @@ int model_proc_parse_output_postproc(const void *json, ModelOutputPostproc *m_po
     jarraylen = json_object_array_length(postproc);
     av_assert0(jarraylen <= MAX_MODEL_OUTPUT);
 
-    for(int i = 0; i < jarraylen; i++){
-        jvalue = json_object_array_get_idx(postproc, i);
+    for (int i = 0; i < jarraylen; i++) {
         OutputPostproc *proc = &m_postproc->procs[i];
+        jvalue = json_object_array_get_idx(postproc, i);
 
-#define FETCH_STRING(var, name)                                           \
-        do { ret = json_object_object_get_ex(jvalue, #name, &var);        \
-            if (ret) proc->name = (char *)json_object_get_string(var);    \
-        } while(0)
-#define FETCH_DOUBLE(var, name)                                           \
-        do { ret = json_object_object_get_ex(jvalue, #name, &var);        \
-            if (ret) proc->name = (double)json_object_get_double(var);    \
-        } while(0)
-#define FETCH_INTEGER(var, name)                                          \
-        do { ret = json_object_object_get_ex(jvalue, #name, &var);        \
-            if (ret) proc->name = (int)json_object_get_int(var);          \
-        } while(0)
+#define FETCH_STRING(var, name)                                                                                        \
+    do {                                                                                                               \
+        ret = json_object_object_get_ex(jvalue, #name, &var);                                                          \
+        if (ret)                                                                                                       \
+            proc->name = (char *)json_object_get_string(var);                                                          \
+    } while (0)
+#define FETCH_DOUBLE(var, name)                                                                                        \
+    do {                                                                                                               \
+        ret = json_object_object_get_ex(jvalue, #name, &var);                                                          \
+        if (ret)                                                                                                       \
+            proc->name = (double)json_object_get_double(var);                                                          \
+    } while (0)
+#define FETCH_INTEGER(var, name)                                                                                       \
+    do {                                                                                                               \
+        ret = json_object_object_get_ex(jvalue, #name, &var);                                                          \
+        if (ret)                                                                                                       \
+            proc->name = (int)json_object_get_int(var);                                                                \
+    } while (0)
 
         FETCH_STRING(layer, layer_name);
         FETCH_STRING(method, method);
@@ -206,24 +213,24 @@ int model_proc_parse_output_postproc(const void *json, ModelOutputPostproc *m_po
             size_t labels_num = json_object_array_length(labels);
 
             if (labels_num > 0) {
-                AVBufferRef *ref    = NULL;
+                AVBufferRef *ref = NULL;
                 LabelsArray *larray = av_mallocz(sizeof(*larray));
 
                 if (!larray)
                     return AVERROR(ENOMEM);
 
-                for(int i = 0; i < labels_num; i++){
+                for (int i = 0; i < labels_num; i++) {
+                    char *copy = NULL;
                     label = json_object_array_get_idx(labels, i);
-                    char *l = av_strdup(json_object_get_string(label));
-                    av_dynarray_add(&larray->label, &larray->num, l);
+                    copy = av_strdup(json_object_get_string(label));
+                    av_dynarray_add(&larray->label, &larray->num, copy);
                 }
 
-                ref = av_buffer_create((uint8_t *)larray, sizeof(*larray),
-                        &infer_labels_buffer_free, NULL, 0);
+                ref = av_buffer_create((uint8_t *)larray, sizeof(*larray), &infer_labels_buffer_free, NULL, 0);
 
                 proc->labels = ref;
-                 
-                if(ref)
+
+                if (ref)
                     infer_labels_dump(ref->data);
             }
         }
@@ -236,12 +243,11 @@ int model_proc_parse_output_postproc(const void *json, ModelOutputPostproc *m_po
     return 0;
 }
 
-void model_proc_release_model_proc(const void *json,
-        ModelInputPreproc *preproc, ModelOutputPostproc *postproc)
-{
+void model_proc_release_model_proc(const void *json, ModelInputPreproc *preproc, ModelOutputPostproc *postproc) {
     size_t index = 0;
 
-    if (!json) return;
+    if (!json)
+        return;
 
     if (postproc) {
         for (index = 0; index < MAX_MODEL_OUTPUT; index++) {

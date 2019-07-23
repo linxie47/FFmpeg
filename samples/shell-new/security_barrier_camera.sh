@@ -8,7 +8,7 @@ if [ -z ${MODELS_PATH} ]; then
 fi
 
 BASEDIR=$(dirname "$0")/../..
-usage="$(basename "$0") [-i <stream>] [-options] -- program to do face reidentification
+usage="$(basename "$0") [-i <stream>] [-options] -- vehicle/license plate recognition
 
 where:
 -h            show this help text
@@ -30,7 +30,7 @@ while getopts ':ab:hi:r:svd:' option; do
         h) echo "$usage"
             exit
             ;;
-        a) hw_accel="-flags unaligned -hwaccel vaapi -hwaccel_output_format vaapi -extra_hw_frames 32 -hwaccel_device /dev/dri/renderD128"
+        a) hw_accel="-flags unaligned -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128"
            hw_dl="hwdownload,format=bgr0,"
             ;;
         i) stream=$OPTARG
@@ -54,9 +54,9 @@ while getopts ':ab:hi:r:svd:' option; do
 done
 shift $((OPTIND - 1))
 
-MODEL1=face-detection-adas-0001
-#MODEL1=face-detection-retail-0004
-MODEL2=face-reidentification-retail-0095
+MODEL1=vehicle-license-plate-detection-barrier-0106
+MODEL2=vehicle-attributes-recognition-barrier-0039
+MODEL3=license-plate-recognition-barrier-0001
 
 CPU="CPU"
 GPU="GPU"
@@ -92,11 +92,14 @@ GET_PRECISION() {
 if [ ! -z "$devices_pattern" ]; then
     DEVICE1=$(echo "${devices_pattern:0:1}")
     DEVICE2=$(echo "${devices_pattern:1:1}")
+    DEVICE3=$(echo "${devices_pattern:2:1}")
     D_ID1=$(GET_DEVICE_ID $DEVICE1)
     D_ID2=$(GET_DEVICE_ID $DEVICE2)
+    D_ID3=$(GET_DEVICE_ID $DEVICE3)
 fi
 D_ID1=${D_ID1:-$CPU}
 D_ID2=${D_ID2:-$CPU}
+D_ID3=${D_ID3:-$CPU}
 
 GET_MODEL_PATH() {
     for path in ${MODELS_PATH//:/ }; do
@@ -114,9 +117,11 @@ GET_MODEL_PATH() {
 
 DETECT_MODEL_PATH=$(GET_MODEL_PATH $MODEL1 $(GET_PRECISION $DEVICE1))
 CLASS_MODEL_PATH=$(GET_MODEL_PATH  $MODEL2 $(GET_PRECISION $DEVICE2))
+CLASS_MODEL_PATH1=$(GET_MODEL_PATH $MODEL3 $(GET_PRECISION $DEVICE3))
 
 echo "$DETECT_MODEL_PATH"
 echo "$CLASS_MODEL_PATH"
+echo "$CLASS_MODEL_PATH1"
 
 PROC_PATH() {
     echo ${BASEDIR}/samples/model_proc/$1.json
@@ -124,21 +129,20 @@ PROC_PATH() {
 
 req_num1=${req_num:-4}
 req_num2=${req_num:-4}
+req_num3=${req_num:-4}
 batch=${batch:-1}
-
-GALLERY=${BASEDIR}/samples/shell/reidentification/gallery/gallery.json
 
 if [ ! -z "$show" ]; then
     $BASEDIR/ffplay $debug_log -i $stream -sync video -vf \
-        "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
+        "ie_detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL1):device=$D_ID1, \
         ie_classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2, \
-        identify=gallery=$GALLERY, \
+        ie_classify=model=$CLASS_MODEL_PATH1:model_proc=$(PROC_PATH $MODEL3):device=$D_ID3, \
         ocv_overlay"
 else
-    #gdb --args \
-    $BASEDIR/ffmpeg_g $debug_log $hw_accel \
-        -i $stream -vf "${hw_dl}ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
+    $BASEDIR/ffmpeg $debug_log $hw_accel \
+        -i $stream -vf \
+        "${hw_dl}ie_detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL1):device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
         ie_classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2:nireq=$req_num2:batch_size=$batch, \
-        identify=gallery=$GALLERY" \
-        -an -f null - #iemetadata -y /tmp/face-identify.json
+        ie_classify=model=$CLASS_MODEL_PATH1:model_proc=$(PROC_PATH $MODEL3):device=$D_ID3:nireq=$req_num3:batch_size=$batch" \
+        -an -f null - #-f iemetadata -y /tmp/security.json
 fi

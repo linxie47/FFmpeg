@@ -29,6 +29,8 @@ FFBaseInference *av_base_inference_create(const char *inference_id) {
     base_inference->param.batch_size = 1;
     base_inference->param.threshold = 0.5;
 
+    base_inference->num_skipped_frames = UINT_MAX - 1; // always run inference on first frame
+
     return base_inference;
 }
 

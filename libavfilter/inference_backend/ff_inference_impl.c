@@ -9,13 +9,17 @@
 #include "ff_list.h"
 #include "image_inference.h"
 #include "logger.h"
+#include "model_proc.h"
 #include <libavutil/avassert.h>
 #include <libavutil/log.h>
 #include <pthread.h>
 
-#if CONFIG_LIBJSON_C
-#include "model_proc.h"
-#endif
+typedef enum {
+    INFERENCE_EXECUTED = 1,
+    INFERENCE_SKIPPED_PER_PROPERTY = 2, // frame skipped due to every-nth-frame set to value greater than 1
+    INFERENCE_SKIPPED_REALTIME_QOS = 3, // frame skipped due to realtime-qos policy
+    INFERENCE_SKIPPED_ROI = 4           // roi skipped because is_roi_classification_needed() returned false
+} InferenceStatus;
 
 typedef struct __Model {
     const char *name;
@@ -26,7 +30,7 @@ typedef struct __Model {
     void *input_preproc;
 
     void *proc_config;
-    ModelInputPreproc   model_preproc;
+    ModelInputPreproc model_preproc;
     ModelOutputPostproc model_postproc;
 } Model;
 
@@ -150,12 +154,18 @@ static void ff_buffer_map(AVFrame *frame, Image *image, MemoryType memoryType) {
     }
 }
 
-static int CheckObjectClass(const char *requested, const char *quark) {
+static int CheckObjectClass(const char *requested, const InferDetection *detection) {
+    LabelsArray *label_array = NULL;
     if (!requested)
         return 1;
-    // strcmp
-    // return requested == g_quark_to_string(quark);
-    return 1;
+
+    if (!detection->label_buf)
+        return 1;
+
+    label_array = (LabelsArray *)detection->label_buf->data;
+    av_assert0(detection->label_id < label_array->num);
+
+    return !strcmp(requested, label_array->label[detection->label_id]) ? 1 : 0;
 }
 
 static inline void PushOutput(FFInferenceImpl *impl) {
@@ -196,8 +206,7 @@ static void InferenceCompletionCallback(OutputBlobArray *blobs, UserDataBuffers 
     }
 
     if (base->post_proc) {
-        ((PostProcFunction)base->post_proc)(blobs, &inference_frames_array, &model->model_postproc, model->name,
-                                            base);
+        ((PostProcFunction)base->post_proc)(blobs, &inference_frames_array, &model->model_postproc, model->name, base);
     }
 
     pthread_mutex_lock(&impl->output_frames_mutex);
@@ -245,19 +254,19 @@ static Model *CreateModel(FFBaseInference *base, const char *model_file, const c
     if (model_proc_path) {
         void *proc = model_proc_read_config_file(model_proc_path);
         if (!proc) {
-            av_log(NULL, AV_LOG_ERROR, "Could not read proc config file:"
-                    "%s\n", model_proc_path);
+            av_log(NULL, AV_LOG_ERROR,
+                   "Could not read proc config file:"
+                   "%s\n",
+                   model_proc_path);
             av_assert0(proc);
         }
 
         if (model_proc_parse_input_preproc(proc, &model->model_preproc) < 0) {
             av_log(NULL, AV_LOG_ERROR, "Parse input preproc error.\n");
-            av_assert0(&model->model_preproc);
         }
 
         if (model_proc_parse_output_postproc(proc, &model->model_postproc) < 0) {
             av_log(NULL, AV_LOG_ERROR, "Parse output postproc error.\n");
-            av_assert0(&model->model_postproc);
         }
 
         model->proc_config = proc;
@@ -325,9 +334,7 @@ static int SubmitImages(FFInferenceImpl *impl, const ROIMetaArray *metas, AVFram
     ff_buffer_map(frame, &image, MEM_TYPE_SYSTEM);
 
     for (int i = 0; i < metas->num_metas; i++) {
-        // if (CheckObjectClass(model.object_class, meta->roi_type)) {
         SubmitImage(impl->model, metas->roi_metas[i], &image, frame);
-        //}
     }
 
     // ff_buffer_unmap(buffer, image, mapContext);
@@ -374,14 +381,28 @@ void FFInferenceImplRelease(FFInferenceImpl *impl) {
 }
 
 int FFInferenceImplAddFrame(void *ctx, FFInferenceImpl *impl, AVFrame *frame) {
-    const FFBaseInference *base_inference = impl->base_inference;
+    FFBaseInference *base_inference = (FFBaseInference *)impl->base_inference;
     ROIMetaArray metas = {};
     FFVideoRegionOfInterestMeta full_frame_meta = {};
-    // count number ROIs to run inference on
     int inference_count = 0;
-    int run_inference = 0;
 
-    // Collect all ROI metas into std::vector
+    InferenceStatus status = INFERENCE_EXECUTED;
+    if (++base_inference->num_skipped_frames < base_inference->param.every_nth_frame) {
+        status = INFERENCE_SKIPPED_PER_PROPERTY;
+    }
+
+    if (base_inference->param.realtime_qos) {
+        ImageInferenceContext *ii_ctx = impl->model->infer_ctx;
+        if (ii_ctx->inference->IsQueueFull(ii_ctx)) {
+            status = INFERENCE_SKIPPED_REALTIME_QOS;
+        }
+    }
+
+    if (status == INFERENCE_EXECUTED) {
+        base_inference->num_skipped_frames = 0;
+    }
+
+    // Collect all ROI metas into ROIMetaArray
     if (base_inference->param.is_full_frame) {
         full_frame_meta.x = 0;
         full_frame_meta.y = 0;
@@ -393,43 +414,32 @@ int FFInferenceImplAddFrame(void *ctx, FFInferenceImpl *impl, AVFrame *frame) {
         BBoxesArray *bboxes = NULL;
         InferDetectionMeta *detect_meta = NULL;
         AVFrameSideData *side_data = av_frame_get_side_data(frame, AV_FRAME_DATA_INFERENCE_DETECTION);
-        if (!side_data) {
-            // No ROI
-            impl->frame_num++;
-            goto output;
-        }
-
-        detect_meta = (InferDetectionMeta *)(side_data->data);
-        av_assert0(detect_meta);
-        bboxes = detect_meta->bboxes;
-        if (bboxes) {
-            for (int i = 0; i < bboxes->num; i++) {
-                FFVideoRegionOfInterestMeta *roi_meta = (FFVideoRegionOfInterestMeta *)av_malloc(sizeof(*roi_meta));
-                roi_meta->x = bboxes->bbox[i]->x_min;
-                roi_meta->y = bboxes->bbox[i]->y_min;
-                roi_meta->w = bboxes->bbox[i]->x_max - bboxes->bbox[i]->x_min;
-                roi_meta->h = bboxes->bbox[i]->y_max - bboxes->bbox[i]->y_min;
-                roi_meta->index = i;
-                av_dynarray_add(&metas.roi_metas, &metas.num_metas, roi_meta);
+        if (side_data) {
+            detect_meta = (InferDetectionMeta *)(side_data->data);
+            av_assert0(detect_meta);
+            bboxes = detect_meta->bboxes;
+            if (bboxes) {
+                ModelInputPreproc *model_preproc = &impl->model->model_preproc;
+                for (int i = 0; i < bboxes->num; i++) {
+                    FFVideoRegionOfInterestMeta *roi_meta = NULL;
+                    if (!CheckObjectClass(model_preproc->object_class, bboxes->bbox[i]))
+                        continue;
+                    roi_meta = (FFVideoRegionOfInterestMeta *)av_malloc(sizeof(*roi_meta));
+                    roi_meta->x = bboxes->bbox[i]->x_min;
+                    roi_meta->y = bboxes->bbox[i]->y_min;
+                    roi_meta->w = bboxes->bbox[i]->x_max - bboxes->bbox[i]->x_min;
+                    roi_meta->h = bboxes->bbox[i]->y_max - bboxes->bbox[i]->y_min;
+                    roi_meta->index = i;
+                    av_dynarray_add(&metas.roi_metas, &metas.num_metas, roi_meta);
+                }
             }
         }
     }
 
+    // count number ROIs to run inference on
+    inference_count = (status == INFERENCE_EXECUTED) ? metas.num_metas : 0;
     impl->frame_num++;
 
-    for (int i = 0; i < metas.num_metas; i++) {
-        FFVideoRegionOfInterestMeta *meta = metas.roi_metas[i];
-        if (CheckObjectClass(impl->model->object_class, meta->type_name)) {
-            inference_count++;
-        }
-    }
-
-    run_inference =
-        !(inference_count == 0 ||
-          // ff_base_inference->every_nth_frame == -1 || // TODO separate property instead of -1
-          (base_inference->param.every_nth_frame > 0 && impl->frame_num % base_inference->param.every_nth_frame > 0));
-
-output:
     // push into output_frames queue
     {
         OutputFrame *output_frame;
@@ -437,7 +447,7 @@ output:
         ff_list_t *processed = impl->processed_frames;
         pthread_mutex_lock(&impl->output_frames_mutex);
 
-        if (!run_inference && output->empty(output)) {
+        if (!inference_count && output->empty(output)) {
             processed->push_back(processed, frame);
             pthread_mutex_unlock(&impl->output_frames_mutex);
             goto exit;
@@ -446,10 +456,10 @@ output:
         output_frame = (OutputFrame *)av_malloc(sizeof(*output_frame));
         output_frame->frame = frame;
         output_frame->writable_frame = NULL; // TODO: alloc new frame if not writable
-        output_frame->inference_count = run_inference ? inference_count : 0;
+        output_frame->inference_count = inference_count;
         impl->output_frames->push_back(impl->output_frames, output_frame);
 
-        if (!run_inference) {
+        if (!inference_count) {
             // If we don't need to run inference and there are no frames queued for inference then finish transform
             pthread_mutex_unlock(&impl->output_frames_mutex);
             goto exit;
