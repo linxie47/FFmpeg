@@ -51,10 +51,6 @@ typedef struct IEClassifyContext {
     FF_INFERENCE_OPTIONS
 
     int    backend_type;
-
-    void  *proc_config;
-    ModelInputPreproc   model_preproc;
-    ModelOutputPostproc model_postproc;
 } IEClassifyContext;
 
 static int query_formats(AVFilterContext *context)
@@ -92,30 +88,7 @@ static av_cold int classify_init(AVFilterContext *ctx)
     param.threshold       = s->threshold;
     param.is_full_frame   = 0;
     param.infer_config    = s->infer_config;
-
-    // Parse model process configuration
-    if (s->model_proc) {
-        void *proc = ff_read_model_proc(s->model_proc);
-        if (!proc) {
-            av_log(ctx, AV_LOG_ERROR, "Could not read proc config file:"
-                    "%s\n", s->model_proc);
-            return AVERROR(EIO);
-        }
-
-        if (ff_parse_input_preproc(proc, &s->model_preproc) < 0) {
-            av_log(ctx, AV_LOG_ERROR, "Parse input preproc error.\n");
-            return AVERROR(EIO);
-        }
-
-        if (ff_parse_output_postproc(proc, &s->model_postproc) < 0) {
-            av_log(ctx, AV_LOG_ERROR, "Parse output postproc error.\n");
-            return AVERROR(EIO);
-        }
-
-        s->proc_config = proc;
-        param.model_preproc  = &s->model_preproc;
-        param.model_postproc = &s->model_postproc;
-    }
+    param.model_proc      = s->model_proc;
 
     s->base = av_base_inference_create(ctx->filter->name);
     if (!s->base) {
@@ -133,8 +106,6 @@ static av_cold void classify_uninit(AVFilterContext *ctx)
     IEClassifyContext *s = ctx->priv;
 
     av_base_inference_release(s->base);
-
-    ff_release_model_proc(s->proc_config, &s->model_preproc, &s->model_postproc);
 }
 
 static int flush_frame(AVFilterLink *outlink, int64_t pts, int64_t *out_pts)

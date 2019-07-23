@@ -39,6 +39,7 @@ OBJS-$(CONFIG_IMAGE_INFERENCE)               += inference_backend/ff_base_infere
                                                 inference_backend/openvino_image_inference.o \
                                                 inference_backend/pre_proc.o                 \
                                                 inference_backend/safe_queue.o               \
+                                                inference_backend/model_proc.o               \
 
 # audio filters
 OBJS-$(CONFIG_ABENCH_FILTER)                 += f_bench.o

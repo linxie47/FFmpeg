@@ -50,8 +50,6 @@ struct __FFInferenceParam {
     FF_INFERENCE_OPTIONS
 
     int is_full_frame;
-    ModelInputPreproc *model_preproc;
-    ModelOutputPostproc *model_postproc;
 };
 
 struct __FFBaseInference {

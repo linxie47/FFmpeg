@@ -299,10 +299,10 @@ static void ExtractBoundingBoxes(const OutputBlobArray *blob_array, InferenceROI
             continue;
         }
 
-        if (ff_base_inference->param.model_postproc) {
-            int idx = findModelPostProcByName(ff_base_inference->param.model_postproc, layer_name);
+        if (model_postproc) {
+            int idx = findModelPostProcByName(model_postproc, layer_name);
             if (idx != MAX_MODEL_OUTPUT)
-                labels = ff_base_inference->param.model_postproc->procs[idx].labels;
+                labels = model_postproc->procs[idx].labels;
         }
 
         boxes = (BBoxesArray **)av_mallocz_array(infer_roi_array->num_infer_ROIs, sizeof(boxes[0]));

@@ -13,6 +13,10 @@
 #include <libavutil/log.h>
 #include <pthread.h>
 
+#if CONFIG_LIBJSON_C
+#include "model_proc.h"
+#endif
+
 typedef struct __Model {
     const char *name;
     char *object_class;
@@ -20,6 +24,10 @@ typedef struct __Model {
     FFInferenceImpl *infer_impl;
     // std::map<std::string, void *> proc;
     void *input_preproc;
+
+    void *proc_config;
+    ModelInputPreproc   model_preproc;
+    ModelOutputPostproc model_postproc;
 } Model;
 
 typedef struct __ROIMetaArray {
@@ -188,7 +196,7 @@ static void InferenceCompletionCallback(OutputBlobArray *blobs, UserDataBuffers 
     }
 
     if (base->post_proc) {
-        ((PostProcFunction)base->post_proc)(blobs, &inference_frames_array, base->param.model_postproc, model->name,
+        ((PostProcFunction)base->post_proc)(blobs, &inference_frames_array, &model->model_postproc, model->name,
                                             base);
     }
 
@@ -234,6 +242,27 @@ static Model *CreateModel(FFBaseInference *base, const char *model_file, const c
     model = (Model *)av_mallocz(sizeof(*model));
     av_assert0(context && model);
 
+    if (model_proc_path) {
+        void *proc = model_proc_read_config_file(model_proc_path);
+        if (!proc) {
+            av_log(NULL, AV_LOG_ERROR, "Could not read proc config file:"
+                    "%s\n", model_proc_path);
+            av_assert0(proc);
+        }
+
+        if (model_proc_parse_input_preproc(proc, &model->model_preproc) < 0) {
+            av_log(NULL, AV_LOG_ERROR, "Parse input preproc error.\n");
+            av_assert0(&model->model_preproc);
+        }
+
+        if (model_proc_parse_output_postproc(proc, &model->model_postproc) < 0) {
+            av_log(NULL, AV_LOG_ERROR, "Parse output postproc error.\n");
+            av_assert0(&model->model_postproc);
+        }
+
+        model->proc_config = proc;
+    }
+
     ret = context->inference->Create(context, MEM_TYPE_ANY, base->param.device, model_file, base->param.batch_size,
                                      base->param.nireq, base->param.infer_config, NULL, InferenceCompletionCallback);
     av_assert0(ret == 0);
@@ -254,6 +283,8 @@ static void ReleaseModel(Model *model) {
     ii_ctx = model->infer_ctx;
     ii_ctx->inference->Close(ii_ctx);
     image_inference_free(ii_ctx);
+
+    model_proc_release_model_proc(model->proc_config, &model->model_preproc, &model->model_postproc);
 
     if (model->object_class)
         av_free(model->object_class);
