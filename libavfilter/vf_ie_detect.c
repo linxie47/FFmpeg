@@ -72,6 +72,30 @@ static int query_formats(AVFilterContext *context)
     return ff_set_common_formats(context, formats_list);
 }
 
+static int config_input(AVFilterLink *inlink)
+{
+    AVFilterContext *ctx = inlink->dst;
+    IEDetectContext *s = ctx->priv;
+    int ret, i;
+    const AVPixFmtDescriptor *desc   = av_pix_fmt_desc_get(inlink->format);
+
+    if (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
+        AVHWFramesContext *hw_frm_ctx = inlink->hw_frames_ctx->data;
+        AVHWDeviceContext *dev_ctx = hw_frm_ctx->device_ref->data;
+        if (av_base_inference_preproc_init(s->base, VPP_DEVICE_HW,
+                    ((AVVAAPIDeviceContext *)dev_ctx->hwctx)->display))
+            return AVERROR(EINVAL);
+
+        for (i = 0; i < ctx->nb_outputs; i++) {
+            if (!ctx->outputs[i]->hw_frames_ctx)
+                ctx->outputs[i]->hw_frames_ctx =
+                    av_buffer_ref(inlink->hw_frames_ctx);
+        }
+    }
+
+    return 0;
+}
+
 static av_cold int detect_init(AVFilterContext *ctx)
 {
     int ret = 0;
@@ -186,6 +210,7 @@ static const AVFilterPad detect_inputs[] = {
     {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
+        .config_props  = config_input,
     },
     { NULL }
 };

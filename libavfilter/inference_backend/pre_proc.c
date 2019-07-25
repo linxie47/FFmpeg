@@ -11,6 +11,7 @@
 extern PreProc pre_proc_ffmpeg;
 extern PreProc pre_proc_opencv;
 extern PreProc pre_proc_gapi;
+extern PreProc pre_proc_vaapi;
 
 static const PreProc *const pre_proc_list[] = {
 #if HAVE_FFMPEG || CONFIG_SWSCALE
@@ -21,6 +22,9 @@ static const PreProc *const pre_proc_list[] = {
 #endif
 #if HAVE_GAPI
     &pre_proc_gapi,
+#endif
+#if CONFIG_VAAPI
+    &pre_proc_vaapi,
 #endif
     NULL};
 

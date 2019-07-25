@@ -37,8 +37,10 @@ typedef struct Image {
     union {
         uint8_t *planes[MAX_PLANES_NUMBER]; // if type==SYSTEM
         void *cl_mem;                       // if type==OPENCL
+        void *surface_id;                   // if type==VAAPI
     };
     int format; // FourCC
+    int colorspace;
     int width;
     int height;
     int stride[MAX_PLANES_NUMBER];

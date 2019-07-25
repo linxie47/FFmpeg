@@ -14,6 +14,8 @@
 #define II_MAX(a, b) ((a) > (b) ? (a) : (b))
 #define II_MIN(a, b) ((a) > (b) ? (b) : (a))
 
+typedef enum { VPP_DEVICE_HW, VPP_DEVICE_SW } DEVICE_TYPE;
+
 static void *WorkingFunction(void *arg);
 
 static inline int getNumberChannels(int format) {
@@ -121,7 +123,7 @@ static inline Image ApplyCrop(const Image *src) {
     return dst;
 }
 
-static void SubmitImageSoftwarePreProcess(ImageInferenceContext *ctx, const BatchRequest *request, const Image *pSrc,
+static void SubmitImagePreProcess(ImageInferenceContext *ctx, const BatchRequest *request, const Image *pSrc,
                                           PreProcessor preProcessor) {
     OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
 
@@ -130,6 +132,8 @@ static void SubmitImageSoftwarePreProcess(ImageInferenceContext *ctx, const Batc
     } else {
         Image src = {};
         Image dst = {};
+
+        dst.type = pSrc->type;
         GetNextImageBuffer(ctx, request, &dst);
 
         if (pSrc->planes[0] != dst.planes[0]) { // only convert if different buffers
@@ -140,7 +144,10 @@ static void SubmitImageSoftwarePreProcess(ImageInferenceContext *ctx, const Batc
 #ifdef HAVE_GAPI
             vino->vpp_ctx->pre_proc->Convert(vino->vpp_ctx, &src, &dst, 0);
 #else
-            src = ApplyCrop(pSrc);
+            if (pSrc->type == MEM_TYPE_SYSTEM)
+                src = ApplyCrop(pSrc);
+            else
+                src = *pSrc;
             vino->vpp_ctx->pre_proc->Convert(vino->vpp_ctx, &src, &dst, 0);
 #endif
             // model specific pre-processing
@@ -330,7 +337,7 @@ static void OpenVINOImageInferenceSubmtImage(ImageInferenceContext *ctx, const I
     // pop() call blocks if freeRequests is empty, i.e all requests still in workingRequests list and not completed
     request = (BatchRequest *)SafeQueuePop(vino->freeRequests);
 
-    SubmitImageSoftwarePreProcess(ctx, request, pSrc, pre_processor);
+    SubmitImagePreProcess(ctx, request, pSrc, pre_processor);
 
     image_inference_dynarray_add(&request->buffers.frames, &request->buffers.num_buffers, user_data);
 
@@ -367,6 +374,19 @@ static const char *OpenVINOImageInferenceGetModelName(ImageInferenceContext *ctx
 static int OpenVINOImageInferenceIsQueueFull(ImageInferenceContext *ctx) {
     OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
     return SafeQueueEmpty(vino->freeRequests);
+}
+
+static int OpenVINOImageInferencePreProcInit(ImageInferenceContext *ctx, int type, void *priv) {
+    int ret = 0;
+
+    OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
+    if (type == VPP_DEVICE_HW) {
+        vino->vpp_ctx = pre_proc_alloc(pre_proc_get_by_type(MEM_TYPE_VAAPI));
+        ret = vino->vpp_ctx->pre_proc->Init(vino->vpp_ctx, priv);
+    } else {
+        /*other special types*/
+    }
+    return ret;
 }
 
 static void OpenVINOImageInferenceFlush(ImageInferenceContext *ctx) {
@@ -543,6 +563,7 @@ ImageInference image_inference_openvino = {
     .SubmitImage = OpenVINOImageInferenceSubmtImage,
     .GetModelName = OpenVINOImageInferenceGetModelName,
     .IsQueueFull = OpenVINOImageInferenceIsQueueFull,
+    .PreProcInit = OpenVINOImageInferencePreProcInit,
     .Flush = OpenVINOImageInferenceFlush,
     .Close = OpenVINOImageInferenceClose,
 };

@@ -95,3 +95,10 @@ void av_base_inference_send_event(void *ctx, FFBaseInference *base, FF_INFERENCE
 
     FFInferenceImplSinkEvent(ctx, (FFInferenceImpl *)base->inference, event);
 }
+
+int av_base_inference_preproc_init(FFBaseInference *base, int type, void *priv) {
+    if (!base)
+        return AVERROR(EINVAL);
+
+    return FFInferenceImplPreProcInit((FFInferenceImpl *)base->inference, type, priv);
+}

@@ -120,6 +120,9 @@ static inline int avFormatToFourCC(int format) {
     case AV_PIX_FMT_YUV420P:
         VAII_DEBUG("AV_PIX_FMT_YUV420P");
         return FOURCC_I420;
+    case AV_PIX_FMT_VAAPI:
+        VAII_DEBUG("AV_PIX_FMT_VAAPI");
+        return FOURCC_RGBP;
     }
 
     av_log(NULL, AV_LOG_ERROR, "Unsupported AV Format: %d.", format);
@@ -127,9 +130,6 @@ static inline int avFormatToFourCC(int format) {
 }
 
 static void ff_buffer_map(AVFrame *frame, Image *image, MemoryType memoryType) {
-#ifdef DISABLE_VAAPI
-    (void)(memoryType);
-#endif
     const int n_planes = 4;
     if (n_planes > MAX_PLANES_NUMBER) {
         av_log(NULL, AV_LOG_ERROR, "Planes number %d isn't supported.", n_planes);
@@ -144,10 +144,13 @@ static void ff_buffer_map(AVFrame *frame, Image *image, MemoryType memoryType) {
         image->stride[i] = frame->linesize[i];
     }
 
-#ifndef DISABLE_VAAPI
-    // TODO VAAPI
+#ifdef CONFIG_VAAPI
+    if (memoryType == MEM_TYPE_VAAPI) {
+        image->surface_id = frame->data[3];
+        image->colorspace = frame->colorspace;
+    }
 #endif
-    {
+    if (memoryType == MEM_TYPE_SYSTEM) {
         for (int i = 0; i < n_planes; i++) {
             image->planes[i] = frame->data[i];
         }
@@ -331,7 +334,8 @@ static int SubmitImages(FFInferenceImpl *impl, const ROIMetaArray *metas, AVFram
     // TODO: map frame w/ different memory type to image
     // BufferMapContext mapContext;
 
-    ff_buffer_map(frame, &image, MEM_TYPE_SYSTEM);
+    //map to the image according to the mem type
+    ff_buffer_map(frame, &image, frame->hw_frames_ctx ? MEM_TYPE_VAAPI : MEM_TYPE_SYSTEM);
 
     for (int i = 0; i < metas->num_metas; i++) {
         SubmitImage(impl->model, metas->roi_metas[i], &image, frame);
@@ -503,4 +507,9 @@ void FFInferenceImplSinkEvent(void *ctx, FFInferenceImpl *impl, FF_INFERENCE_EVE
     if (event == INFERENCE_EVENT_EOS) {
         impl->model->infer_ctx->inference->Flush(impl->model->infer_ctx);
     }
+}
+
+int FFInferenceImplPreProcInit(FFInferenceImpl *impl, int type, void *priv) {
+    ImageInferenceContext *s = impl->model->infer_ctx;
+    return s->inference->PreProcInit(s, type, priv);
 }

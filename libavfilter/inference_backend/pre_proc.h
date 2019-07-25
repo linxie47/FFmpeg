@@ -15,6 +15,8 @@ typedef struct PreProc {
     /* image pre processing module name. Must be non-NULL and unique among pre processing modules. */
     const char *name;
 
+    int (*Init)(PreProcContext *context, void *priv);
+
     void (*Destroy)(PreProcContext *context);
 
     void (*Convert)(PreProcContext *context, const Image *src, Image *dst, int bAllocateDestination);

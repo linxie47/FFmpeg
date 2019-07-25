@@ -19,3 +19,5 @@ int FFInferenceImplGetFrame(void *ctx, FFInferenceImpl *impl, AVFrame **frame);
 size_t FFInferenceImplGetQueueSize(void *ctx, FFInferenceImpl *impl);
 
 void FFInferenceImplSinkEvent(void *ctx, FFInferenceImpl *impl, FF_INFERENCE_EVENT event);
+
+int FFInferenceImplPreProcInit(FFInferenceImpl *impl, int type, void *priv);
