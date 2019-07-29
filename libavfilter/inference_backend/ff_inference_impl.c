@@ -489,9 +489,10 @@ int FFInferenceImplGetFrame(void *ctx, FFInferenceImpl *impl, AVFrame **frame) {
     if (l->empty(l) || !frame)
         return AVERROR(EAGAIN);
 
+    pthread_mutex_lock(&impl->output_frames_mutex);
     *frame = (AVFrame *)l->front(l);
-
     l->pop_front(l);
+    pthread_mutex_unlock(&impl->output_frames_mutex);
 
     return 0;
 }
