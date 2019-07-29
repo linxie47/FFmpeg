@@ -152,8 +152,8 @@ static void FFPreProcDestroy(PreProcContext *context) {
     }
 }
 
-PreProc pre_proc_ffmpeg = {
-    .name = "ffmpeg",
+PreProc pre_proc_swscale = {
+    .name = "swscale",
     .priv_size = sizeof(FFPreProc),
     .mem_type = MEM_TYPE_SYSTEM,
     .Convert = FFPreProcConvert,

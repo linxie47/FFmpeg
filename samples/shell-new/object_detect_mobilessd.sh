@@ -31,7 +31,7 @@ while getopts ':ab:hi:r:svd:' option; do
             exit
             ;;
         a) hw_accel="-flags unaligned -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128"
-           hw_dl="scale_vaapi=300:300:rgbp,hwdownload,format=rgbp,"
+           #hw_dl="scale_vaapi=300:300:rgbp,hwdownload,format=rgbp,"
             ;;
         i) stream=$OPTARG
             ;;
@@ -128,6 +128,6 @@ else
     #gdb --args \
     $BASEDIR/ffmpeg $debug_log $hw_accel -i $stream -vf \
     "${hw_dl}ie_detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL):device=$D_ID1:nireq=$req_num:batch_size=$batch:configs=$cfg_string" \
-        -y -f null - #iemetadata /tmp/obj_detect.json
+        -y -f iemetadata /tmp/obj_detect.json
 fi
 

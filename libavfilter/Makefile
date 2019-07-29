@@ -32,8 +32,8 @@ OBJS-$(CONFIG_DNN)                           += dnn_interface.o dnn_backend_nati
 OBJS-$(CONFIG_IMAGE_INFERENCE)               += inference_backend/ff_base_inference.o        \
                                                 inference_backend/ff_inference_impl.o        \
                                                 inference_backend/ff_list.o                  \
-                                                inference_backend/ff_pre_proc.o              \
-                                                inference_backend/ff_pre_proc_vaapi.o        \
+                                                inference_backend/pre_proc_swscale.o         \
+                                                inference_backend/pre_proc_vaapi.o           \
                                                 inference_backend/ff_proc_factory.o          \
                                                 inference_backend/image_inference.o          \
                                                 inference_backend/logger.o                   \

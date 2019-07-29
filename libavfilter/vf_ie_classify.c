@@ -36,7 +36,6 @@
 #include "libavformat/avformat.h"
 #include "libavutil/time.h"
 
-#include "inference.h"
 #include "inference_backend/ff_base_inference.h"
 
 
@@ -76,17 +75,17 @@ static int config_input(AVFilterLink *inlink)
 {
     AVFilterContext *ctx = inlink->dst;
     IEClassifyContext *s = ctx->priv;
-    int ret, i;
     const AVPixFmtDescriptor *desc   = av_pix_fmt_desc_get(inlink->format);
 
     if (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
-        AVHWFramesContext *hw_frm_ctx = inlink->hw_frames_ctx->data;
-        AVHWDeviceContext *dev_ctx = hw_frm_ctx->device_ref->data;
+        AVHWFramesContext *hw_frm_ctx = (AVHWFramesContext *)inlink->hw_frames_ctx->data;
+        AVHWDeviceContext *dev_ctx = (AVHWDeviceContext *)hw_frm_ctx->device_ref->data;
+#if CONFIG_VAAPI
         if (av_base_inference_preproc_init(s->base, VPP_DEVICE_HW,
                     ((AVVAAPIDeviceContext *)dev_ctx->hwctx)->display))
             return AVERROR(EINVAL);
-
-        for (i = 0; i < ctx->nb_outputs; i++) {
+#endif
+        for (int i = 0; i < ctx->nb_outputs; i++) {
             if (!ctx->outputs[i]->hw_frames_ctx)
                 ctx->outputs[i]->hw_frames_ctx =
                     av_buffer_ref(inlink->hw_frames_ctx);

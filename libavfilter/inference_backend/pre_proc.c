@@ -8,14 +8,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern PreProc pre_proc_ffmpeg;
+extern PreProc pre_proc_swscale;
 extern PreProc pre_proc_opencv;
 extern PreProc pre_proc_gapi;
 extern PreProc pre_proc_vaapi;
 
 static const PreProc *const pre_proc_list[] = {
 #if HAVE_FFMPEG || CONFIG_SWSCALE
-    &pre_proc_ffmpeg,
+    &pre_proc_swscale,
 #endif
 #if HAVE_OPENCV
     &pre_proc_opencv,
@@ -74,7 +74,7 @@ const PreProc *pre_proc_get_by_type(MemoryType type) {
     const PreProc *ret = NULL;
 
     if (type == MEM_TYPE_SYSTEM) {
-        ret = pre_proc_get_by_name("ffmpeg");
+        ret = pre_proc_get_by_name("swscale");
         if (!ret)
             ret = pre_proc_get_by_name("gapi");
         if (!ret)

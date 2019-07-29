@@ -62,8 +62,6 @@ typedef struct InferenceParam {
 /*
  * Vpp device type detected according to frame format
  */
-typedef enum { VPP_DEVICE_HW, VPP_DEVICE_SW } VPPDevice;
-
 typedef struct _SwVpp    SwVpp;
 
 typedef struct _VAAPIVpp VAAPIVpp;

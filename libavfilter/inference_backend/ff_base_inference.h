@@ -10,10 +10,16 @@
 #include <libavutil/frame.h>
 #include <stdint.h>
 
+#if CONFIG_VAAPI
+#include <libavutil/hwcontext_vaapi.h>
+#endif
+
 typedef enum {
     INFERENCE_EVENT_NONE,
     INFERENCE_EVENT_EOS,
 } FF_INFERENCE_EVENT;
+
+typedef enum { VPP_DEVICE_HW, VPP_DEVICE_SW } VPPDevice;
 
 #ifndef TRUE
 /** The TRUE value of a UBool @stable ICU 2.0 */
