@@ -118,7 +118,7 @@ PROC_PATH() {
 req_num=${req_num:-4}
 batch=${batch:-1}
 
-cfg_string="CPU_THROUGHPUT_STREAMS=8\,CPU_THREADS_NUM=8"
+cfg_string="CPU_THROUGHPUT_STREAMS=4\,CPU_THREADS_NUM=8"
 
 if [ ! -z "$show" ]; then
     $BASEDIR/ffplay $debug_log -i $stream -sync video -vf \

@@ -28,6 +28,8 @@ FFBaseInference *av_base_inference_create(const char *inference_id) {
     base_inference->param.nireq = 1;
     base_inference->param.batch_size = 1;
     base_inference->param.threshold = 0.5;
+    base_inference->param.vpp_device = VPP_DEVICE_SW;
+    base_inference->param.opaque = NULL;
 
     base_inference->num_skipped_frames = UINT_MAX - 1; // always run inference on first frame
 
@@ -94,11 +96,4 @@ void av_base_inference_send_event(void *ctx, FFBaseInference *base, FF_INFERENCE
         return;
 
     FFInferenceImplSinkEvent(ctx, (FFInferenceImpl *)base->inference, event);
-}
-
-int av_base_inference_preproc_init(FFBaseInference *base, int type, void *priv) {
-    if (!base)
-        return AVERROR(EINVAL);
-
-    return FFInferenceImplPreProcInit((FFInferenceImpl *)base->inference, type, priv);
 }

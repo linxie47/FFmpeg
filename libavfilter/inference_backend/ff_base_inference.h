@@ -19,7 +19,7 @@ typedef enum {
     INFERENCE_EVENT_EOS,
 } FF_INFERENCE_EVENT;
 
-typedef enum { VPP_DEVICE_HW, VPP_DEVICE_SW } VPPDevice;
+typedef enum { VPP_DEVICE_SW, VPP_DEVICE_HW } VPPDevice;
 
 #ifndef TRUE
 /** The TRUE value of a UBool @stable ICU 2.0 */
@@ -55,6 +55,9 @@ typedef struct __ModelOutputPostproc ModelOutputPostproc;
 struct __FFInferenceParam {
     // exposed options
     FF_INFERENCE_OPTIONS
+
+    VPPDevice vpp_device; // VPPDevice default:SW
+    void *opaque;         // VADisplay for vaapi
 
     int is_full_frame;
 };
@@ -212,5 +215,3 @@ int av_base_inference_get_frame(void *ctx, FFBaseInference *base, AVFrame **fram
 int av_base_inference_frame_queue_empty(void *ctx, FFBaseInference *base);
 
 void av_base_inference_send_event(void *ctx, FFBaseInference *base, FF_INFERENCE_EVENT event);
-
-int av_base_inference_preproc_init(FFBaseInference *base, int type, void *priv);

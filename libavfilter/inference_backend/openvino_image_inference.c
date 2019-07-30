@@ -124,7 +124,7 @@ static inline Image ApplyCrop(const Image *src) {
 }
 
 static void SubmitImagePreProcess(ImageInferenceContext *ctx, const BatchRequest *request, const Image *pSrc,
-                                          PreProcessor preProcessor) {
+                                  PreProcessor preProcessor) {
     OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
 
     if (vino->resize_by_inference) {
@@ -371,22 +371,18 @@ static const char *OpenVINOImageInferenceGetModelName(ImageInferenceContext *ctx
     return vino->model_name;
 }
 
+static void OpenVINOImageInferenceGetModelInputInfo(ImageInferenceContext *ctx, int *width, int *height, int *format) {
+    OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
+    dimensions_t *input_blob_dims = &vino->inputs[0]->dim; // assuming one input layer
+    assert(input_blob_dims->ranks > 2);
+    *width = input_blob_dims->dims[3];  // W
+    *height = input_blob_dims->dims[2]; // H
+    *format = FOURCC_RGBP;
+}
+
 static int OpenVINOImageInferenceIsQueueFull(ImageInferenceContext *ctx) {
     OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
     return SafeQueueEmpty(vino->freeRequests);
-}
-
-static int OpenVINOImageInferencePreProcInit(ImageInferenceContext *ctx, int type, void *priv) {
-    int ret = 0;
-
-    OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
-    if (type == VPP_DEVICE_HW) {
-        vino->vpp_ctx = pre_proc_alloc(pre_proc_get_by_type(MEM_TYPE_VAAPI));
-        ret = vino->vpp_ctx->pre_proc->Init(vino->vpp_ctx, priv);
-    } else {
-        /*other special types*/
-    }
-    return ret;
 }
 
 static void OpenVINOImageInferenceFlush(ImageInferenceContext *ctx) {
@@ -562,8 +558,8 @@ ImageInference image_inference_openvino = {
     .Create = OpenVINOImageInferenceCreate,
     .SubmitImage = OpenVINOImageInferenceSubmtImage,
     .GetModelName = OpenVINOImageInferenceGetModelName,
+    .GetModelInputInfo = OpenVINOImageInferenceGetModelInputInfo,
     .IsQueueFull = OpenVINOImageInferenceIsQueueFull,
-    .PreProcInit = OpenVINOImageInferencePreProcInit,
     .Flush = OpenVINOImageInferenceFlush,
     .Close = OpenVINOImageInferenceClose,
 };

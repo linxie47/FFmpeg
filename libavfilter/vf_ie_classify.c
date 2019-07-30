@@ -73,32 +73,10 @@ static int query_formats(AVFilterContext *context)
 
 static int config_input(AVFilterLink *inlink)
 {
+    int ret = 0;
     AVFilterContext *ctx = inlink->dst;
     IEClassifyContext *s = ctx->priv;
     const AVPixFmtDescriptor *desc   = av_pix_fmt_desc_get(inlink->format);
-
-    if (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
-        AVHWFramesContext *hw_frm_ctx = (AVHWFramesContext *)inlink->hw_frames_ctx->data;
-        AVHWDeviceContext *dev_ctx = (AVHWDeviceContext *)hw_frm_ctx->device_ref->data;
-#if CONFIG_VAAPI
-        if (av_base_inference_preproc_init(s->base, VPP_DEVICE_HW,
-                    ((AVVAAPIDeviceContext *)dev_ctx->hwctx)->display))
-            return AVERROR(EINVAL);
-#endif
-        for (int i = 0; i < ctx->nb_outputs; i++) {
-            if (!ctx->outputs[i]->hw_frames_ctx)
-                ctx->outputs[i]->hw_frames_ctx =
-                    av_buffer_ref(inlink->hw_frames_ctx);
-        }
-    }
-
-    return 0;
-}
-
-static av_cold int classify_init(AVFilterContext *ctx)
-{
-    int ret = 0;
-    IEClassifyContext *s = ctx->priv;
     FFInferenceParam param = { };
 
     av_assert0(s->model);
@@ -119,9 +97,28 @@ static av_cold int classify_init(AVFilterContext *ctx)
         return AVERROR(EINVAL);
     }
 
+    if (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
+        AVHWFramesContext *hw_frm_ctx = (AVHWFramesContext *)inlink->hw_frames_ctx->data;
+        AVHWDeviceContext *dev_ctx = (AVHWDeviceContext *)hw_frm_ctx->device_ref->data;
+#if CONFIG_VAAPI
+        param.vpp_device = VPP_DEVICE_HW;
+        param.opaque = (void *)((AVVAAPIDeviceContext *)dev_ctx->hwctx)->display;
+#endif
+        for (int i = 0; i < ctx->nb_outputs; i++) {
+            if (!ctx->outputs[i]->hw_frames_ctx)
+                ctx->outputs[i]->hw_frames_ctx = av_buffer_ref(inlink->hw_frames_ctx);
+        }
+    }
+
     ret = av_base_inference_set_params(s->base, &param);
 
     return ret;
+}
+
+static av_cold int classify_init(AVFilterContext *ctx)
+{
+    /* moved to config_input */
+    return 0;
 }
 
 static av_cold void classify_uninit(AVFilterContext *ctx)

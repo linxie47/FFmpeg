@@ -46,6 +46,7 @@ int GetPlanesCount(int fourcc) {
 
     return 0;
 }
+
 static const PreProc *pre_proc_iterate(void **opaque) {
     uintptr_t i = (uintptr_t)*opaque;
     const PreProc *pp = pre_proc_list[i];
@@ -107,7 +108,6 @@ PreProcContext *pre_proc_alloc(const PreProc *pre_proc) {
 
     return ret;
 err:
-    free(ret->priv);
     free(ret);
     return NULL;
 }

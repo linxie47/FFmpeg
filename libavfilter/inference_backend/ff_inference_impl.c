@@ -146,7 +146,7 @@ static void ff_buffer_map(AVFrame *frame, Image *image, MemoryType memoryType) {
 
 #ifdef CONFIG_VAAPI
     if (memoryType == MEM_TYPE_VAAPI) {
-        image->surface_id = frame->data[3];
+        image->surface_id = (uint32_t)frame->data[3];
         image->colorspace = frame->colorspace;
     }
 #endif
@@ -279,6 +279,23 @@ static Model *CreateModel(FFBaseInference *base, const char *model_file, const c
                                      base->param.nireq, base->param.infer_config, NULL, InferenceCompletionCallback);
     av_assert0(ret == 0);
 
+    // Create async pre_proc image inference backend for HW vpp
+    if (base->param.vpp_device == VPP_DEVICE_HW && base->param.opaque) {
+        PreProcContext *preproc_ctx = NULL;
+        ImageInferenceContext *async_preproc_ctx = NULL;
+
+        const ImageInference *inference = image_inference_get_by_name("async_preproc");
+        async_preproc_ctx = image_inference_alloc(inference, NULL, "async-preproc-infer");
+        preproc_ctx = pre_proc_alloc(pre_proc_get_by_name("vaapi"));
+
+        av_assert0(async_preproc_ctx && preproc_ctx);
+
+        async_preproc_ctx->inference->CreateAsyncPreproc(async_preproc_ctx, context, preproc_ctx, 6, base->param.opaque);
+
+        // substitute for opevino image inference
+        context = async_preproc_ctx;
+    }
+
     model->infer_ctx = context;
     model->name = context->inference->GetModelName(context);
     model->object_class = object_class ? av_strdup(object_class) : NULL;
@@ -334,7 +351,7 @@ static int SubmitImages(FFInferenceImpl *impl, const ROIMetaArray *metas, AVFram
     // TODO: map frame w/ different memory type to image
     // BufferMapContext mapContext;
 
-    //map to the image according to the mem type
+    // map to the image according to the mem type
     ff_buffer_map(frame, &image, frame->hw_frames_ctx ? MEM_TYPE_VAAPI : MEM_TYPE_SYSTEM);
 
     for (int i = 0; i < metas->num_metas; i++) {
@@ -508,9 +525,4 @@ void FFInferenceImplSinkEvent(void *ctx, FFInferenceImpl *impl, FF_INFERENCE_EVE
     if (event == INFERENCE_EVENT_EOS) {
         impl->model->infer_ctx->inference->Flush(impl->model->infer_ctx);
     }
-}
-
-int FFInferenceImplPreProcInit(FFInferenceImpl *impl, int type, void *priv) {
-    ImageInferenceContext *s = impl->model->infer_ctx;
-    return s->inference->PreProcInit(s, type, priv);
 }
