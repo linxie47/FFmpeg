@@ -56,6 +56,7 @@ struct _VAAPIVpp {
     VAContextID va_context;
     VAImageFormat *format_list; //!< Surface formats which can be used with this device.
     int nb_formats;
+    int scale_w, scale_h;
     VAImage va_image;
     VAImageFormat va_format_selected;
 };
@@ -129,17 +130,7 @@ static int FFPreProcInit(PreProcContext *context, void *priv)
     int err, image_count;
 
     ff_pre_proc->vaapi_vpp = va_vpp;
-    //device_ref = av_buffer_ref(hw_frm_ctx->device_ref);
-    //if (!device_ref) {
-    //    fprintf(stderr, "A device reference create failed.\n");
-    //    return -1;
-    //}
 
-    //va_vpp->hwctx = ((AVHWDeviceContext *)device_ref->data)->hwctx;
-
-    //av_buffer_unref(&device_ref);
-
-    //display = va_vpp->display;
     display = (VADisplay)priv;
 
     image_count = vaMaxNumImageFormats(display);
@@ -184,6 +175,8 @@ static void FFPreProcConvert(PreProcContext *context, const Image *src, Image *d
     void *address = NULL;
     int rect_x, rect_y, rect_width, rect_height, scale_w, scale_h, i, j;
     uint8_t *src_data;
+    Image dst_rgb = *dst;
+    VAStatus vas;
     int ret;
 
     // identical format and resolution
@@ -213,8 +206,18 @@ static void FFPreProcConvert(PreProcContext *context, const Image *src, Image *d
 
     input_surface = (VASurfaceID)(uintptr_t)src->surface_id;
 
-    if (ff_pre_proc->vaapi_vpp->va_surface == VA_INVALID_ID) {
-        ret = va_surface_alloc(ff_pre_proc->vaapi_vpp, src->width, src->height, dst->format);
+    if (va_vpp->va_surface == VA_INVALID_ID ||
+            va_vpp->scale_w != dst->width || va_vpp->scale_h != dst->height) {
+        if (va_vpp->va_surface != VA_INVALID_ID) {
+            vas = vaDestroySurfaces(va_vpp->display, &va_vpp->va_surface, 1);
+            if (vas != VA_STATUS_SUCCESS) {
+                fprintf(stderr, "Failed to destroy surface, %s\n", vaErrorStr(vas));
+            }
+        }
+
+        va_vpp->scale_w = dst->width;
+        va_vpp->scale_h = dst->height;
+        ret = va_surface_alloc(ff_pre_proc->vaapi_vpp, dst->width, dst->height, dst->format);
         if (ret < 0) {
             fprintf(stderr,"Create va surface failed\n");
             return;
@@ -277,16 +280,18 @@ static void FFPreProcConvert(PreProcContext *context, const Image *src, Image *d
 
     VA_CALL(vaMapBuffer(va_vpp->display, va_image_ptr->buf, &address));
 
+    dst_rgb.planes[0] = dst->planes[2];
+    dst_rgb.planes[2] = dst->planes[0];
     for (i = 0; i < II_MIN(va_image_ptr->num_planes, MAX_PLANES_NUMBER); i++) {
         int stride = va_image_ptr->pitches[i];
         src_data = (uint8_t *)address + va_image_ptr->offsets[i];
         for (j = 0; j < scale_h; j++) {
-            memcpy(dst->planes[i] + j * scale_w, src_data + j * stride, scale_w);
+            memcpy(dst_rgb.planes[i] + j * scale_w, src_data + j * stride, scale_w);
         }
     }
+
 back:
     VA_CALL(vaUnmapBuffer(va_vpp->display, va_image_ptr->buf));
-    VA_CALL(vaDestroyImage(va_vpp->display, va_image_ptr->image_id));
 
     return;
 }
