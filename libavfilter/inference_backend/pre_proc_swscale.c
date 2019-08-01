@@ -128,7 +128,7 @@ static void FFPreProcConvert(PreProcContext *context, const Image *src, Image *d
     }
 
     sws_context = sws_getCachedContext(sws_context, src->width, src->height, FOURCC2FFmpegFormat(src->format),
-                                       dst->width, dst->height, AV_PIX_FMT_GBRP, SWS_BILINEAR, NULL, NULL, NULL);
+                                       dst->width, dst->height, AV_PIX_FMT_GBRP, SWS_FAST_BILINEAR, NULL, NULL, NULL);
     assert(sws_context);
     // BGR->GBR
     gbr_planes[0] = dst->planes[1];
