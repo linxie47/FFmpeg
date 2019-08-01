@@ -11,6 +11,8 @@
 #include "image_inference_async_preproc.h"
 #include "logger.h"
 
+#define MOCKER_PRE_PROC_MAGIC 0x47474747
+
 static void *AsyncPreprocWorkingFunction(void *arg);
 
 static void PreprocImagesFree(PreprocImage **imgs, size_t num_imgs) {
@@ -34,6 +36,8 @@ static int ImageInferenceAsyncPreprocCreate(ImageInferenceContext *async_preproc
     ImageInferenceAsyncPreproc *async_preproc = (ImageInferenceAsyncPreproc *)async_preproc_context->priv;
     PreProcInitParam pp_init_param = {};
     assert(inference_context && preproc_context);
+
+    VAII_INFO("Using async preproc image inference.");
 
     async_preproc->actual = inference_context;
     async_preproc->pre_proc = preproc_context;
@@ -73,7 +77,10 @@ static int ImageInferenceAsyncPreprocCreate(ImageInferenceContext *async_preproc
         preproc_image->image.width = width;
         preproc_image->image.height = height;
         preproc_image->image.format = format;
-        preproc_image->img_map_ctx = image_map_alloc(image_map_get_by_name("vaapi"));
+        if (MOCKER_PRE_PROC_MAGIC == (uint32_t)opaque)
+            preproc_image->img_map_ctx = image_map_alloc(image_map_get_by_name("mocker"));
+        else
+            preproc_image->img_map_ctx = image_map_alloc(image_map_get_by_name("vaapi"));
 
         async_preproc->preproc_images[n] = preproc_image;
         SafeQueuePush(async_preproc->freeImages, preproc_image);
@@ -162,6 +169,7 @@ static void ImageInferenceAsyncPreprocClose(ImageInferenceContext *ctx) {
 
     infer->Close(infer_ctx);
     image_inference_free(infer_ctx);
+    pre_proc_free(async_preproc->pre_proc);
 
     PreprocImagesFree(async_preproc->preproc_images, async_preproc->num_preproc_images);
 

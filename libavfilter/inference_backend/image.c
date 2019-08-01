@@ -11,14 +11,32 @@
 #include <string.h>
 
 extern ImageMap image_map_vaapi;
+extern ImageMap image_map_mocker;
+
+static const ImageMap *const image_map_list[] = {&image_map_vaapi, &image_map_mocker, NULL};
+
+static const ImageMap *image_map_iterate(void **opaque) {
+    uintptr_t i = (uintptr_t)*opaque;
+    const ImageMap *im = image_map_list[i];
+
+    if (im != NULL)
+        *opaque = (void *)(i + 1);
+
+    return im;
+}
 
 const ImageMap *image_map_get_by_name(const char *name) {
-    const ImageMap *m = &image_map_vaapi;
-    if (!strcmp(name, m->name))
-        return m;
+    const ImageMap *im = NULL;
+    void *opaque = 0;
 
-    fprintf(stderr, "Support VAAPI image map only!\n");
-    assert(0);
+    if (name == NULL)
+        return NULL;
+
+    while ((im = image_map_iterate(&opaque)))
+        if (!strcmp(im->name, name))
+            return im;
+
+    return NULL;
 }
 
 ImageMapContext *image_map_alloc(const ImageMap *image_map) {

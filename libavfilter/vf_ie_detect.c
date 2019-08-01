@@ -49,6 +49,7 @@ typedef struct IEDetectContext {
 
     FF_INFERENCE_OPTIONS
 
+    int    async_preproc;
     int    backend_type;
 } IEDetectContext;
 
@@ -90,6 +91,7 @@ static int config_input(AVFilterLink *inlink)
     param.is_full_frame   = 1;
     param.infer_config    = s->infer_config;
     param.model_proc      = s->model_proc;
+    param.opaque          = s->async_preproc ? (void *)MOCKER_PRE_PROC_MAGIC : 0;
 
     s->base = av_base_inference_create(ctx->filter->name);
     if (!s->base) {
@@ -196,7 +198,7 @@ static const AVOption ie_detect_options[] = {
     { "nireq",        "inference request number",        OFFSET(nireq),           AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 128,  FLAGS},
     { "batch_size",   "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1000, FLAGS},
     { "threshold",    "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5}, 0, 1,    FLAGS},
-
+    { "async_preproc", "do asynchronous preproc in inference backend", OFFSET(async_preproc), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, FLAGS },
     { NULL }
 };
 

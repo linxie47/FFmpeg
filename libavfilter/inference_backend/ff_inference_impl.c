@@ -279,18 +279,22 @@ static Model *CreateModel(FFBaseInference *base, const char *model_file, const c
                                      base->param.nireq, base->param.infer_config, NULL, InferenceCompletionCallback);
     av_assert0(ret == 0);
 
-    // Create async pre_proc image inference backend for HW vpp
-    if (base->param.vpp_device == VPP_DEVICE_HW && base->param.opaque) {
+    // Create async pre_proc image inference backend
+    if (base->param.opaque) {
         PreProcContext *preproc_ctx = NULL;
         ImageInferenceContext *async_preproc_ctx = NULL;
 
         const ImageInference *inference = image_inference_get_by_name("async_preproc");
         async_preproc_ctx = image_inference_alloc(inference, NULL, "async-preproc-infer");
-        preproc_ctx = pre_proc_alloc(pre_proc_get_by_name("vaapi"));
+        if (base->param.vpp_device == VPP_DEVICE_HW)
+            preproc_ctx = pre_proc_alloc(pre_proc_get_by_name("vaapi"));
+        else
+            preproc_ctx = pre_proc_alloc(pre_proc_get_by_name("mocker"));
 
         av_assert0(async_preproc_ctx && preproc_ctx);
 
-        async_preproc_ctx->inference->CreateAsyncPreproc(async_preproc_ctx, context, preproc_ctx, 6, base->param.opaque);
+        async_preproc_ctx->inference->CreateAsyncPreproc(async_preproc_ctx, context, preproc_ctx, 6,
+                                                         base->param.opaque);
 
         // substitute for opevino image inference
         context = async_preproc_ctx;

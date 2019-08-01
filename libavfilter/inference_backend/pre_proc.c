@@ -12,6 +12,7 @@ extern PreProc pre_proc_swscale;
 extern PreProc pre_proc_opencv;
 extern PreProc pre_proc_gapi;
 extern PreProc pre_proc_vaapi;
+extern PreProc pre_proc_mocker;
 
 static const PreProc *const pre_proc_list[] = {
 #if HAVE_FFMPEG || CONFIG_SWSCALE
@@ -26,7 +27,7 @@ static const PreProc *const pre_proc_list[] = {
 #if CONFIG_VAAPI
     &pre_proc_vaapi,
 #endif
-    NULL};
+    &pre_proc_mocker,  NULL};
 
 int GetPlanesCount(int fourcc) {
     switch (fourcc) {
