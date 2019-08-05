@@ -176,6 +176,7 @@ static int activate(AVFilterContext *ctx)
         if (status == AVERROR_EOF) {
             int64_t out_pts = pts;
 
+            av_log(ctx, AV_LOG_INFO, "Get EOS.\n");
             ret = flush_frame(outlink, pts, &out_pts);
             ff_outlink_set_status(outlink, status, out_pts);
             return ret;

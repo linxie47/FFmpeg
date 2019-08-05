@@ -162,20 +162,24 @@ static int activate(AVFilterContext *ctx)
 
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
-    ret = ff_inlink_consume_frame(inlink, &in);
-    if (ret < 0)
-        return ret;
-    if (ret > 0)
-        av_base_inference_send_frame(ctx, s->base, in);
+    // drain all frames from inlink
+    do {
+        ret = ff_inlink_consume_frame(inlink, &in);
+        if (ret < 0)
+            return ret;
+        if (ret > 0)
+            av_base_inference_send_frame(ctx, s->base, in);
 
-    av_base_inference_get_frame(ctx, s->base, &output);
-    if (output)
-        return ff_filter_frame(outlink, output);
+        av_base_inference_get_frame(ctx, s->base, &output);
+        if (output)
+            return ff_filter_frame(outlink, output);
+    } while (ret > 0);
 
     if (ff_inlink_acknowledge_status(inlink, &status, &pts)) {
         if (status == AVERROR_EOF) {
             int64_t out_pts = pts;
 
+            av_log(ctx, AV_LOG_INFO, "Get EOS.\n");
             ret = flush_frame(outlink, pts, &out_pts);
             ff_outlink_set_status(outlink, status, out_pts);
             return ret;
