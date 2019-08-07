@@ -5,6 +5,7 @@
  ******************************************************************************/
 
 #include "image.h"
+#include "config.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,7 +14,11 @@
 extern ImageMap image_map_vaapi;
 extern ImageMap image_map_mocker;
 
-static const ImageMap *const image_map_list[] = {&image_map_vaapi, &image_map_mocker, NULL};
+static const ImageMap *const image_map_list[] = {
+#if CONFIG_VAAPI
+    &image_map_vaapi,
+#endif
+    &image_map_mocker, NULL};
 
 static const ImageMap *image_map_iterate(void **opaque) {
     uintptr_t i = (uintptr_t)*opaque;

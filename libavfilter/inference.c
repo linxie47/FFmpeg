@@ -946,7 +946,7 @@ int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
 {
     json_object *jvalue, *postproc;
     json_object *attribute, *converter, *labels, *layer, *method, *threshold;
-    json_object *tensor2text_scale, *tensor2text_precision;
+    json_object *tensor_to_text_scale, *tensor_to_text_precision;
     int ret;
     size_t jarraylen;
 
@@ -960,8 +960,8 @@ int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
     av_assert0(jarraylen <= MAX_MODEL_OUTPUT);
 
     for(int i = 0; i < jarraylen; i++){
-        jvalue = json_object_array_get_idx(postproc, i);
         OutputPostproc *proc = &m_postproc->procs[i];
+        jvalue = json_object_array_get_idx(postproc, i);
 
 #define FETCH_STRING(var, name)                                           \
         do { ret = json_object_object_get_ex(jvalue, #name, &var);        \
@@ -982,9 +982,9 @@ int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
         FETCH_STRING(converter, converter);
 
         FETCH_DOUBLE(threshold, threshold);
-        FETCH_DOUBLE(tensor2text_scale, tensor2text_scale);
+        FETCH_DOUBLE(tensor_to_text_scale, tensor_to_text_scale);
 
-        FETCH_INTEGER(tensor2text_precision, tensor2text_precision);
+        FETCH_INTEGER(tensor_to_text_precision, tensor_to_text_precision);
 
         // handle labels
         ret = json_object_object_get_ex(jvalue, "labels", &labels);
@@ -1000,8 +1000,9 @@ int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
                     return AVERROR(ENOMEM);
 
                 for(int i = 0; i < labels_num; i++){
+                    char *l;
                     label = json_object_array_get_idx(labels, i);
-                    char *l = av_strdup(json_object_get_string(label));
+                    l = av_strdup(json_object_get_string(label));
                     av_dynarray_add(&larray->label, &larray->num, l);
                 }
 
@@ -1009,7 +1010,7 @@ int ff_parse_output_postproc(const void *json, ModelOutputPostproc *m_postproc)
                         &infer_labels_buffer_free, NULL, 0);
 
                 proc->labels = ref;
-                 
+
                 if(ref)
                     infer_labels_dump(ref->data);
             }

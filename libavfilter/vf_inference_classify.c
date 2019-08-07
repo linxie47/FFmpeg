@@ -220,8 +220,8 @@ static int tensor_to_text(AVFilterContext *ctx,
     if (!classify)
         return AVERROR(ENOMEM);
 
-    if (proc->tensor2text_scale != 0)
-        scale = proc->tensor2text_scale;
+    if (proc->tensor_to_text_scale != 0)
+        scale = proc->tensor_to_text_scale;
 
     classify->detect_id = detect_id;
     classify->name      = proc->attribute_name;
