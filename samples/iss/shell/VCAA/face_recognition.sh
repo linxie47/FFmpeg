@@ -13,7 +13,7 @@ source $BASEDIR/scripts/setlocale.sh
 source $BASEDIR/scripts/path_extractor.sh
 
 FILE=${1}
-GALLERY=$BASEDIR/scripts/gallery_generators/gallery.json
+GALLERY=$BASEDIR/scripts/gallery_generator/gallery.json
 
 DETECTION_MODEL=face-detection-adas-0001-fp16
 DETECT_MODEL_PATH=$(GET_MODEL_PATH $DETECTION_MODEL)

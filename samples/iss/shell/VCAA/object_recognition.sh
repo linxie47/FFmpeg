@@ -29,4 +29,4 @@ echo LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
 
 ffmpeg $HW_ACCEL -i ${FILE} -vf " \
   ie_detect=model=$DETECTION_MODEL_PATH:model_proc=$DETECTION_MODEL_PROC_PATH:device=$DEVICE:nireq=24" \
-  -an -f null 
+  -an -f null -
