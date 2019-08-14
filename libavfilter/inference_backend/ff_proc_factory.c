@@ -34,6 +34,7 @@ static void infer_classify_metadata_buffer_free(void *opaque, uint8_t *data) {
     if (classes) {
         for (i = 0; i < classes->num; i++) {
             InferClassification *c = classes->classifications[i];
+            av_freep(&c->attributes);
             av_buffer_unref(&c->label_buf);
             av_buffer_unref(&c->tensor_buf);
             av_freep(&c);
@@ -480,8 +481,8 @@ static int attributes_to_text(FFVideoRegionOfInterestMeta *meta, OutputPostproc 
         int i;
         double threshold = 0.5;
         float confidence = 0;
-        char attributes[4096] = {};
         LabelsArray *array;
+        classification->attributes = av_mallocz(4096*sizeof(char));
 
         if (post_proc->threshold != 0)
             threshold = post_proc->threshold;
@@ -489,7 +490,7 @@ static int attributes_to_text(FFVideoRegionOfInterestMeta *meta, OutputPostproc 
         array = (LabelsArray *)post_proc->labels->data;
         for (i = 0; i < array->num; i++) {
             if (blob_data[i] >= threshold)
-                strncat(attributes, array->label[i], (strlen(array->label[i]) + 1));
+                strncat(classification->attributes, array->label[i], (strlen(array->label[i]) + 1));
             if (blob_data[i] > confidence)
                 confidence = blob_data[i];
         }
@@ -497,23 +498,23 @@ static int attributes_to_text(FFVideoRegionOfInterestMeta *meta, OutputPostproc 
         classification->name = post_proc->attribute_name;
         classification->confidence = confidence;
 
-        av_log(NULL, AV_LOG_DEBUG, "Attributes: %s\n", attributes);
+        av_log(NULL, AV_LOG_DEBUG, "Attributes: %s\n", classification->attributes);
     } else if (method_index) {
         int i;
-        char attributes[1024] = {};
         LabelsArray *array;
+        classification->attributes = av_mallocz(4096*sizeof(char));
 
         array = (LabelsArray *)post_proc->labels->data;
         for (i = 0; i < array->num; i++) {
             int value = blob_data[i];
             if (value < 0 || value >= array->num)
                 break;
-            strncat(attributes, array->label[value], (strlen(array->label[value]) + 1));
+            strncat(classification->attributes, array->label[value], (strlen(array->label[value]) + 1));
         }
 
         classification->name = post_proc->attribute_name;
 
-        av_log(NULL, AV_LOG_DEBUG, "Attributes: %s\n", attributes);
+        av_log(NULL, AV_LOG_DEBUG, "Attributes: %s\n", classification->attributes);
     }
 
     return 0;

@@ -32,12 +32,15 @@
 #include "internal.h"
 #include "avfilter.h"
 
-#include "inference.h"
+#include "inference_backend/ff_base_inference.h"
+#include "inference_backend/model_proc.h"
 
 #include <json-c/json.h>
 
 #define OFFSET(x) offsetof(InferenceIdentifyContext, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_FILTERING_PARAM)
+
+#define UNUSED(x) (void)(x)
 
 #define PI 3.1415926
 #define FACE_FEATURE_VECTOR_LEN 256
@@ -68,20 +71,27 @@ static const char *get_filename_ext(const char *filename) {
 
 const char *gallery_file_suffix = "json";
 
-static void infer_labels_buffer_free(void *opaque, uint8_t *data)
-{
-    int i;
-    LabelsArray *labels = (LabelsArray *)data;
+static double av_norm(float vec[], size_t num) {
+    size_t i;
+    double result = 0.0;
 
-    for (i = 0; i < labels->num; i++)
-        av_freep(&labels->label[i]);
+    for (i = 0; i < num; i++)
+        result += vec[i] * vec[i];
 
-    av_free(labels->label);
-    av_free(data);
+    return sqrt(result);
 }
 
-static int query_formats(AVFilterContext *context)
-{
+static double av_dot(float vec1[], float vec2[], size_t num) {
+    size_t i;
+    double result = 0.0;
+
+    for (i = 0; i < num; i++)
+        result += vec1[i] * vec2[i];
+
+    return result;
+}
+
+static int query_formats(AVFilterContext *context) {
     AVFilterFormats *formats_list;
     const enum AVPixelFormat pixel_formats[] = {
         AV_PIX_FMT_YUV420P,  AV_PIX_FMT_YUV422P,  AV_PIX_FMT_YUV444P,
@@ -100,8 +110,7 @@ static int query_formats(AVFilterContext *context)
     return ff_set_common_formats(context, formats_list);
 }
 
-static av_cold int identify_init(AVFilterContext *ctx)
-{
+static av_cold int identify_init(AVFilterContext *ctx) {
     size_t i, index = 1;
     char *dup, *unknown;
     const char *dirname;
@@ -119,7 +128,7 @@ static av_cold int identify_init(AVFilterContext *ctx)
         return AVERROR(EINVAL);
     }
 
-    entry = ff_read_model_proc(s->gallery);
+    entry = model_proc_read_config_file(s->gallery);
     if (!entry) {
         av_log(ctx, AV_LOG_ERROR, "Could not open gallery file:%s\n", s->gallery);
         return AVERROR(EIO);
@@ -146,7 +155,7 @@ static av_cold int identify_init(AVFilterContext *ctx)
         if (ret) {
             size_t features_num = json_object_array_length(features);
 
-            for(int i = 0; i < features_num; i++){
+            for(int i = 0; i < features_num; i++) {
                 FILE *vec_fp;
                 FeatureLabelPair *pair;
                 char path[4096];
@@ -211,8 +220,7 @@ static av_cold int identify_init(AVFilterContext *ctx)
     return 0;
 }
 
-static av_cold void identify_uninit(AVFilterContext *ctx)
-{
+static av_cold void identify_uninit(AVFilterContext *ctx) {
     int i;
     InferenceIdentifyContext *s = ctx->priv;
 
@@ -230,16 +238,14 @@ static av_cold void identify_uninit(AVFilterContext *ctx)
 }
 
 static av_cold void dump_face_id(AVFilterContext *ctx, int label_id,
-                                 float conf, AVBufferRef *label_buf)
-{
+                                 float conf, AVBufferRef *label_buf) {
     LabelsArray *array = (LabelsArray *)label_buf->data;
 
     av_log(ctx, AV_LOG_DEBUG,"CLASSIFY META - Face_id:%d Name:%s Conf:%1.2f\n",
            label_id, array->label[label_id], conf);
 }
 
-static int face_identify(AVFilterContext *ctx, AVFrame *frame)
-{
+static int face_identify(AVFilterContext *ctx, AVFrame *frame) {
     int i;
     InferenceIdentifyContext *s = ctx->priv;
     AVFrameSideData *side_data;
@@ -292,8 +298,7 @@ static int face_identify(AVFilterContext *ctx, AVFrame *frame)
     return 0;
 }
 
-static int filter_frame(AVFilterLink *inlink, AVFrame *in)
-{
+static int filter_frame(AVFilterLink *inlink, AVFrame *in) {
     AVFilterContext *ctx  = inlink->dst;
     AVFilterLink *outlink = inlink->dst->outputs[0];
 

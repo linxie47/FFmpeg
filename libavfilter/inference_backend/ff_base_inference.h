@@ -178,6 +178,7 @@ typedef struct InferClassification {
     char *name;       ///< class name, e.g. emotion, age
     char *layer_name; ///< output layer name
     char *model;      ///< model name
+    char *attributes;
     int label_id;     ///< label index in labels
     float confidence;
     float value;

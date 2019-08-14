@@ -8,7 +8,17 @@
 #include "libavutil/avassert.h"
 #include <json-c/json.h>
 
-static void infer_labels_buffer_free(void *opaque, uint8_t *data) {
+// helper functions
+static void infer_labels_dump(uint8_t *data) {
+    int i;
+    LabelsArray *labels = (LabelsArray *)data;
+    printf("labels: ");
+    for (i = 0; i < labels->num; i++)
+        printf("%s ", labels->label[i]);
+    printf("\n");
+}
+
+void infer_labels_buffer_free(void *opaque, uint8_t *data) {
     int i;
     LabelsArray *labels = (LabelsArray *)data;
 
@@ -18,16 +28,6 @@ static void infer_labels_buffer_free(void *opaque, uint8_t *data) {
     av_free(labels->label);
 
     av_free(data);
-}
-
-// helper functions
-static void infer_labels_dump(uint8_t *data) {
-    int i;
-    LabelsArray *labels = (LabelsArray *)data;
-    printf("labels: ");
-    for (i = 0; i < labels->num; i++)
-        printf("%s ", labels->label[i]);
-    printf("\n");
 }
 
 int model_proc_get_file_size(FILE *fp) {

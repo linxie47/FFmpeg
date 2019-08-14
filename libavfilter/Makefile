@@ -44,6 +44,7 @@ OBJS-$(CONFIG_IMAGE_INFERENCE)               += inference_backend/ff_base_infere
                                                 inference_backend/pre_proc_swscale.o              \
                                                 inference_backend/pre_proc_vaapi.o                \
                                                 inference_backend/safe_queue.o                    \
+                                                inference_backend/metaconverter.o                 \
 
 # audio filters
 OBJS-$(CONFIG_ABENCH_FILTER)                 += f_bench.o

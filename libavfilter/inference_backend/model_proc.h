@@ -21,3 +21,5 @@ int model_proc_parse_output_postproc(const void *json, ModelOutputPostproc *m_po
 void model_proc_release_model_proc(const void *json, ModelInputPreproc *preproc, ModelOutputPostproc *postproc);
 
 int model_proc_get_file_size(FILE *fp);
+
+void infer_labels_buffer_free(void *opaque, uint8_t *data);
