@@ -159,6 +159,7 @@ static int activate(AVFilterContext *ctx)
     AVFrame *in = NULL, *output = NULL;
     int64_t pts;
     int ret, status;
+    int got_frames = 0;
 
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 
@@ -170,10 +171,19 @@ static int activate(AVFilterContext *ctx)
         if (ret > 0)
             av_base_inference_send_frame(ctx, s->base, in);
 
-        av_base_inference_get_frame(ctx, s->base, &output);
-        if (output)
-            return ff_filter_frame(outlink, output);
+        while (av_base_inference_get_frame(ctx, s->base, &output) == 0) {
+            if (output) {
+                status = ff_filter_frame(outlink, output);
+                if (status < 0)
+                    return status;
+                got_frames = 1;
+                output = NULL;
+            }
+        }
     } while (ret > 0);
+
+    if (got_frames)
+        return 0;
 
     if (ff_inlink_acknowledge_status(inlink, &status, &pts)) {
         if (status == AVERROR_EOF) {
