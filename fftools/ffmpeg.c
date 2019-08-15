@@ -1780,14 +1780,15 @@ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_ti
         total_frames_num = 0;
         for (i = 0; i < nb_output_streams; i++) {
             ost = output_streams[i];
-            total_frames_num += ost->frame_number;
+            total_frames_num += ost->frames_encoded;
         }
         float total_fps;
         total_fps = t > 1 ? total_frames_num / t : 0;
         av_bprintf(&buf, "| profiling | total frame=%d ", total_frames_num);
         av_bprintf(&buf, "fps=%.2f |", total_fps);
         total_fps = t > 1 ? total_frames_num / (t - init_time / 1000000.0 ): 0;
-        av_bprintf(&buf, ", fps without filter init=%.2f |", total_fps);
+        if (total_fps > 0)
+            av_bprintf(&buf, " fps without filter init=%.2f |", total_fps);
     }
 
     secs = FFABS(pts) / AV_TIME_BASE;
@@ -4763,7 +4764,7 @@ static int transcode(void)
     for (i = 0; i < nb_output_streams; i++) {
         ost = output_streams[i];
         if (ost->encoding_needed) {
-            if (do_profiling_all) {
+            if (0) {
                 if (ost->enc_ctx->frame_number > 1 && ost->enc_ctx->sum_working_time > 1) {
                     double fps = (double)(ost->enc_ctx->frame_number * 1000000) / ost->enc_ctx->sum_working_time;
                     printf("| encode profiling | name=%s, frame=%d, fps=%.2f\n",
@@ -4784,7 +4785,7 @@ static int transcode(void)
     for (i = 0; i < nb_input_streams; i++) {
         ist = input_streams[i];
         if (ist->decoding_needed) {
-            if (do_profiling_all && !ist->dec_ctx->hwaccel) {
+            if (0) {
                 if (ist->dec_ctx->frame_number > 1 && ist->dec_ctx->sum_working_time > 1) {
                     double fps = (double)(ist->dec_ctx->frame_number * 1000000) / ist->dec_ctx->sum_working_time;
                     printf("| sw decode profiling | name=%s, frame=%d, fps=%.2f\n",

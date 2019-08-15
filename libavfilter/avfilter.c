@@ -279,8 +279,11 @@ int avfilter_config_links(AVFilterContext *filter)
 {
     int (*config_link)(AVFilterLink *);
     unsigned i;
+    int64_t tm_init;
     int ret;
 
+    if (av_profiling_get())
+        tm_init = av_gettime();
     for (i = 0; i < filter->nb_inputs; i ++) {
         AVFilterLink *link = filter->inputs[i];
         AVFilterLink *inlink;
@@ -301,6 +304,8 @@ int avfilter_config_links(AVFilterContext *filter)
             continue;
         case AVLINK_STARTINIT:
             av_log(filter, AV_LOG_INFO, "circular filter chain detected\n");
+            if (av_profiling_get())
+                filter->init_working_time += av_gettime() - tm_init;
             return 0;
         case AVLINK_UNINIT:
             link->init_state = AVLINK_STARTINIT;
@@ -378,6 +383,8 @@ int avfilter_config_links(AVFilterContext *filter)
         }
     }
 
+    if (av_profiling_get())
+        filter->init_working_time += av_gettime() - tm_init;
     return 0;
 }
 
@@ -1022,7 +1029,7 @@ int avfilter_init_str(AVFilterContext *filter, const char *args)
         tm_init = av_gettime();
     ret = avfilter_init_dict(filter, &options);
     if (av_profiling_get())
-        filter->init_working_time = av_gettime() - tm_init;
+        filter->init_working_time += av_gettime() - tm_init;
 
     if (ret < 0)
         goto fail;
