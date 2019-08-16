@@ -307,10 +307,10 @@ static int commmon_postprocess(AVFilterContext *ctx,
     if (proc->converter == NULL)
         return default_postprocess(ctx, detect_id, result_id, model_id, meta, c_meta);
 
-    if (!strcmp(proc->converter, "attributes"))
+    if (!strcmp(proc->converter, "tensor_to_label"))
         return attributes_to_text(ctx, detect_id, proc, meta, c_meta);
 
-    if (!strcmp(proc->converter, "tensor2text"))
+    if (!strcmp(proc->converter, "tensor_to_text"))
         return tensor_to_text(ctx, detect_id, proc, meta, c_meta);
 
     return 0;

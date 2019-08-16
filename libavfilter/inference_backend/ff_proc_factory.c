@@ -582,10 +582,10 @@ static void Blob2RoiMeta(const OutputBlobArray *blob_array, InferenceROIArray *i
             classification->model = (char *)model_name;
 
             if (post_proc && post_proc->converter) {
-                if (!strcmp(post_proc->converter, "attributes")) {
+                if (!strcmp(post_proc->converter, "tensor_to_label")) {
                     attributes_to_text(meta, post_proc, (void *)(data + b * size), dimensions, classification,
                                        classify_meta);
-                } else if (!strcmp(post_proc->converter, "tensor2text")) {
+                } else if (!strcmp(post_proc->converter, "tensor_to_text")) {
                     tensor_to_text(meta, post_proc, (void *)(data + b * size), dimensions, classification,
                                    classify_meta);
                 } else {
