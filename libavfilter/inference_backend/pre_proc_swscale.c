@@ -6,6 +6,7 @@
 
 #include "pre_proc.h"
 #include <assert.h>
+#include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
 // #define DEBUG
 
@@ -96,18 +97,17 @@ static inline enum AVPixelFormat FOURCC2FFmpegFormat(int format) {
 }
 
 typedef struct FFPreProc {
-    struct SwsContext *sws_context;
-    struct SwsContext *cascaded_context[2];
-    Image cascaded_img[2];
+    struct SwsContext *sws_context[3];
+    Image image_yuv;
+    Image image_bgr;
 } FFPreProc;
 
 static void FFPreProcConvert(PreProcContext *context, const Image *src, Image *dst, int bAllocateDestination) {
     FFPreProc *ff_pre_proc = (FFPreProc *)context->priv;
-    struct SwsContext *sws_context = ff_pre_proc->sws_context;
-    struct SwsContext **cascaded_context = ff_pre_proc->cascaded_context;
-    Image *cascaded_img = ff_pre_proc->cascaded_img;
+    struct SwsContext **sws_context = ff_pre_proc->sws_context;
+    Image *image_yuv = &ff_pre_proc->image_yuv;
+    Image *image_bgr = &ff_pre_proc->image_bgr;
     uint8_t *gbr_planes[3] = {};
-    int i;
 
     // if identical format and resolution
     if (src->format == dst->format && src->format == FOURCC_RGBP && src->width == dst->width &&
@@ -132,84 +132,97 @@ static void FFPreProcConvert(PreProcContext *context, const Image *src, Image *d
         return;
     }
 #define PLANE_NUM 3
-    if (cascaded_img[0].width != dst->width || cascaded_img[0].height != dst->height) {
-        for (i = 0; i < 2; i++) {
-            cascaded_img[i].width = dst->width;
-            cascaded_img[i].height = dst->height;
-            cascaded_img[i].stride[0] = FFALIGN(dst->width * PLANE_NUM, 16);
-            if (cascaded_img[i].planes[0])
-                free(cascaded_img[i].planes[0]);
-            cascaded_img[i].planes[0] = (uint8_t *)malloc(cascaded_img[i].stride[0] * cascaded_img[i].height * PLANE_NUM);
-            if (!cascaded_img[i].planes[0]) {
-                fprintf(stderr, "Error of mem alloc on FFMPEG sws_scale\n");
-                assert(0);
-            }
-            for (int j = 1; j < PLANE_NUM; j++) {
-                cascaded_img[i].stride[j] = cascaded_img[i].stride[0];
-                cascaded_img[i].planes[j] = cascaded_img[i].planes[0] + j * (cascaded_img[i].stride[j] * cascaded_img[i].height);
-            }
+    // init image YUV
+    if (image_yuv->width != dst->width || image_yuv->height != dst->height) {
+        int ret = 0;
+        image_yuv->width = dst->width;
+        image_yuv->height = dst->height;
+        image_yuv->format = src->format; // no CSC for the 1st stage
+
+        if (image_yuv->planes[0])
+            av_freep(&image_yuv->planes[0]);
+        ret = av_image_alloc(image_yuv->planes, image_yuv->stride, image_yuv->width, image_yuv->height,
+                             FOURCC2FFmpegFormat(image_yuv->format), 16);
+        if (ret < 0) {
+            fprintf(stderr, "Alloc yuv image buffer error!\n");
+            assert(0);
         }
     }
 
-    sws_context = sws_getCachedContext(sws_context, src->width, src->height, FOURCC2FFmpegFormat(src->format),
-                                       dst->width, dst->height, AV_PIX_FMT_YUV420P, SWS_FAST_BILINEAR, NULL, NULL, NULL);
-    cascaded_context[0] = sws_getCachedContext(cascaded_context[0], dst->width, dst->height, AV_PIX_FMT_YUV420P,
-                                       dst->width, dst->height, AV_PIX_FMT_RGB24, SWS_FAST_BILINEAR, NULL, NULL, NULL);
-    cascaded_context[1] = sws_getCachedContext(cascaded_context[1], dst->width, dst->height, AV_PIX_FMT_RGB24,
-                                       dst->width, dst->height, AV_PIX_FMT_GBRP, SWS_FAST_BILINEAR, NULL, NULL, NULL);
-    assert(sws_context);
-    assert(cascaded_context[0]);
-    assert(cascaded_context[1]);
+    // init image BGR24
+    if (image_bgr->width != image_yuv->width || image_bgr->height != image_yuv->height) {
+        int ret = 0;
+        image_bgr->width = image_yuv->width;
+        image_bgr->height = image_yuv->height;
+        image_bgr->format = FOURCC_BGR; // YUV -> BGR packed for the 2nd stage
+
+        if (image_bgr->planes[0])
+            av_freep(&image_bgr->planes[0]);
+        ret = av_image_alloc(image_bgr->planes, image_bgr->stride, image_bgr->width, image_bgr->height,
+                             FOURCC2FFmpegFormat(image_bgr->format), 16);
+        if (ret < 0) {
+            fprintf(stderr, "Alloc bgr image buffer error!\n");
+            assert(0);
+        }
+    }
+
+    sws_context[0] = sws_getCachedContext(sws_context[0], src->width, src->height, FOURCC2FFmpegFormat(src->format),
+                                          image_yuv->width, image_yuv->height, FOURCC2FFmpegFormat(image_yuv->format),
+                                          SWS_FAST_BILINEAR, NULL, NULL, NULL);
+    sws_context[1] = sws_getCachedContext(sws_context[1], image_yuv->width, image_yuv->height,
+                                          FOURCC2FFmpegFormat(image_yuv->format), image_bgr->width, image_bgr->height,
+                                          FOURCC2FFmpegFormat(image_bgr->format), SWS_FAST_BILINEAR, NULL, NULL, NULL);
+    sws_context[2] = sws_getCachedContext(sws_context[2], image_bgr->width, image_bgr->height,
+                                          FOURCC2FFmpegFormat(image_bgr->format), dst->width, dst->height,
+                                          AV_PIX_FMT_GBRP, SWS_FAST_BILINEAR, NULL, NULL, NULL);
+
+    for (int i = 0; i < 3; i++)
+        assert(sws_context[i]);
 
     // BGR->GBR
     gbr_planes[0] = dst->planes[1];
     gbr_planes[1] = dst->planes[0];
     gbr_planes[2] = dst->planes[2];
 
-    if (!sws_scale(sws_context, (const uint8_t *const *)src->planes, src->stride, 0, src->height, cascaded_img[0].planes,
-                   cascaded_img[0].stride)) {
-        fprintf(stderr, "Error on FFMPEG sws_scale\n");
+    // stage 1: yuv -> yuv, resize to dst size
+    if (!sws_scale(sws_context[0], (const uint8_t *const *)src->planes, src->stride, 0, src->height,
+                   image_yuv->planes, image_yuv->stride)) {
+        fprintf(stderr, "Error on FFMPEG sws_scale stage 1\n");
         assert(0);
     }
-    if (!sws_scale(cascaded_context[0], (const uint8_t *const *)cascaded_img[0].planes, cascaded_img[0].stride, 0, dst->height, cascaded_img[1].planes,
-                   cascaded_img[1].stride)) {
-        fprintf(stderr, "Error on FFMPEG cascaded_context0\n");
+    // stage 2: yuv -> bgr packed, no resize
+    if (!sws_scale(sws_context[1], (const uint8_t *const *)image_yuv->planes, image_yuv->stride, 0, image_yuv->height,
+                   image_bgr->planes, image_bgr->stride)) {
+        fprintf(stderr, "Error on FFMPEG sws_scale stage 2\n");
         assert(0);
     }
-    if (!sws_scale(cascaded_context[1], (const uint8_t *const *)cascaded_img[1].planes, cascaded_img[1].stride, 0, dst->height, gbr_planes,
-                   dst->stride)) {
-        fprintf(stderr, "Error on FFMPEG cascaded_context1\n");
+    // stage 3: bgr -> gbr planer, no resize
+    if (!sws_scale(sws_context[2], (const uint8_t *const *)image_bgr->planes, image_bgr->stride, 0, image_bgr->height,
+                   gbr_planes, dst->stride)) {
+        fprintf(stderr, "Error on FFMPEG sws_scale stage 3\n");
         assert(0);
     }
 
     /* dump pre-processed image to file */
     // DumpBGRpToFile(dst);
-    ff_pre_proc->sws_context = sws_context;
-    ff_pre_proc->cascaded_context[0] = cascaded_context[0];
-    ff_pre_proc->cascaded_context[1] = cascaded_context[1];
 }
 
 static void FFPreProcDestroy(PreProcContext *context) {
     FFPreProc *ff_pre_proc = (FFPreProc *)context->priv;
-    Image *cascaded_img = ff_pre_proc->cascaded_img;
-    int i;
 
-    if (ff_pre_proc->sws_context) {
-        sws_freeContext(ff_pre_proc->sws_context);
-        ff_pre_proc->sws_context = NULL;
+    for (int i = 0; i < 3; i++) {
+        if (ff_pre_proc->sws_context[i]) {
+            sws_freeContext(ff_pre_proc->sws_context[i]);
+            ff_pre_proc->sws_context[i] = NULL;
+        }
     }
-    if (ff_pre_proc->cascaded_context[0]) {
-        sws_freeContext(ff_pre_proc->cascaded_context[0]);
-        ff_pre_proc->cascaded_context[0] = NULL;
+    if (ff_pre_proc->image_yuv.planes[0]) {
+        av_freep(&ff_pre_proc->image_yuv.planes[0]);
+        ff_pre_proc->image_yuv.planes[0] = NULL;
     }
-    if (ff_pre_proc->cascaded_context[1]) {
-        sws_freeContext(ff_pre_proc->cascaded_context[1]);
-        ff_pre_proc->cascaded_context[1] = NULL;
-    }
-    for (i = 0; i < 2; i++) {
-        if (cascaded_img[i].planes[0])
-            free(cascaded_img[i].planes[0]);
-        cascaded_img[i].planes[0] = NULL;
+    if (ff_pre_proc->image_bgr.planes[0]) {
+        av_freep(&ff_pre_proc->image_bgr.planes[0]);
+        ff_pre_proc->image_bgr.planes[0] = NULL;
     }
 }
 
