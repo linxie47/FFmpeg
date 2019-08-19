@@ -4292,6 +4292,27 @@ static int process_input(int file_index)
     int ret, thread_ret, i, j;
     int64_t duration;
     int64_t pkt_dts;
+    AVCodecContext *avctx;
+
+    for (i = 0; i < ifile->nb_streams; i++) {
+        ist = input_streams[ifile->ist_index + i];
+        avctx = ist->dec_ctx;
+        if (avctx && avctx->hw_frames_ctx) {
+            AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+
+            int empty = av_buffer_pool_is_empty(frames_ctx->pool);
+
+            if (empty) {
+                av_log(NULL, AV_LOG_WARNING, "Buffer pool is empty.\n");
+                for (j = 0; j < nb_filtergraphs; j++) {
+                    FilterGraph *fg = filtergraphs[j];
+                    avfilter_graph_set_parsed(fg->graph);
+                }
+                usleep(1000);
+                return 0;
+            }
+        }
+    }
 
     is  = ifile->ctx;
     ret = get_input_packet(ifile, &pkt);

@@ -285,6 +285,12 @@ void av_buffer_pool_uninit(AVBufferPool **pool);
 AVBufferRef *av_buffer_pool_get(AVBufferPool *pool);
 
 /**
+ * Check if the buffer pool is empty.
+ *
+ * @return 1: empty 0: not empty
+ */
+int av_buffer_pool_is_empty(AVBufferPool *pool);
+/**
  * @}
  */
 

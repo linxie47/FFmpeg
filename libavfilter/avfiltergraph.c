@@ -41,6 +41,7 @@
 #include "formats.h"
 #include "internal.h"
 #include "thread.h"
+#include "filters.h"
 
 #define OFFSET(x) offsetof(AVFilterGraph, x)
 #define F AV_OPT_FLAG_FILTERING_PARAM
@@ -296,6 +297,19 @@ AVFilterContext *avfilter_graph_get_filter(AVFilterGraph *graph, const char *nam
             return graph->filters[i];
 
     return NULL;
+}
+
+int avfilter_graph_set_parsed(AVFilterGraph *graph)
+{
+    AVFilterContext *filter;
+    unsigned i;
+
+    for (i = 0; i < graph->nb_filters; i++)
+        if (!strncmp(graph->filters[i]->name, "Parsed", 6)) {
+            filter = graph->filters[i];
+            ff_filter_set_ready(filter, 300);
+        }
+    return 0;
 }
 
 static void sanitize_channel_layouts(void *log, AVFilterChannelLayouts *l)

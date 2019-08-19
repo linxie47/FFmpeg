@@ -1164,6 +1164,11 @@ char *avfilter_graph_dump(AVFilterGraph *graph, const char *options);
 int avfilter_graph_request_oldest(AVFilterGraph *graph);
 
 /**
+ * Set parsed filter to be ready on a filter graph.
+ */
+int avfilter_graph_set_parsed(AVFilterGraph *graph);
+
+/**
  * @}
  */
 

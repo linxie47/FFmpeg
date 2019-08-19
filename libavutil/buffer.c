@@ -331,6 +331,17 @@ static AVBufferRef *pool_alloc_buffer(AVBufferPool *pool)
     return ret;
 }
 
+int av_buffer_pool_is_empty(AVBufferPool *pool)
+{
+    int empty = 0;
+
+    ff_mutex_lock(&pool->mutex);
+    empty = pool->pool ? 0 : 1;
+    ff_mutex_unlock(&pool->mutex);
+
+    return empty;
+}
+
 AVBufferRef *av_buffer_pool_get(AVBufferPool *pool)
 {
     AVBufferRef *ret;
