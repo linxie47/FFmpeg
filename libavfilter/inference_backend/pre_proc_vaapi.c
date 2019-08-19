@@ -200,7 +200,7 @@ static Image VAAPIMap(ImageMapContext *context, const Image *image) {
                                     .va_reserved = {}};
     }
 
-    // VA_CALL(vaSyncSurface(va_display, image->surface_id));
+    VA_CALL(vaSyncSurface(va_display, image->surface_id));
 
     if (va_format.fourcc &&
         vaCreateImage(va_display, &va_format, image->width, image->height, &va_image) == VA_STATUS_SUCCESS) {
