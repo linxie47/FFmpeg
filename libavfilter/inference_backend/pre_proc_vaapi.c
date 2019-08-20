@@ -92,7 +92,7 @@ static int VAAPIPreProcInit(PreProcContext *context, PreProcInitParam *param) {
     vaapi_pre_proc->va_context = va_context;
 
     for (int i = 0; i < vaapi_pre_proc->nb_formats; i++) {
-        if (vaapi_pre_proc->format_list[i].fourcc == VA_RT_FORMAT_RGBP) {
+        if (vaapi_pre_proc->format_list[i].fourcc == VA_FOURCC_RGBP) {
             vaapi_pre_proc->va_format_selected = vaapi_pre_proc->format_list[i];
             break;
         }
