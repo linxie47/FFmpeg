@@ -38,9 +38,10 @@
 
 #include "inference_backend/ff_base_inference.h"
 
-
 #define OFFSET(x) offsetof(IEClassifyContext, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_FILTERING_PARAM)
+
+static int flush_frame(AVFilterContext *ctx, AVFilterLink *outlink, int64_t pts, int64_t *out_pts);
 
 typedef struct IEClassifyContext {
     const AVClass *class;
@@ -51,6 +52,7 @@ typedef struct IEClassifyContext {
 
     int    async_preproc;
     int    backend_type;
+    int    already_flushed;
 } IEClassifyContext;
 
 static int query_formats(AVFilterContext *context)
@@ -127,27 +129,37 @@ static av_cold void classify_uninit(AVFilterContext *ctx)
 {
     IEClassifyContext *s = ctx->priv;
 
+    flush_frame(ctx, NULL, 0LL, NULL);
+
     av_base_inference_release(s->base);
 }
 
-static int flush_frame(AVFilterLink *outlink, int64_t pts, int64_t *out_pts)
+static int flush_frame(AVFilterContext *ctx, AVFilterLink *outlink, int64_t pts, int64_t *out_pts)
 {
-    AVFilterContext *ctx = outlink->src;
-    IEClassifyContext *s = ctx->priv;
     int ret = 0;
+    IEClassifyContext *s = ctx->priv;
+
+    if (s->already_flushed)
+        return ret;
 
     while (!av_base_inference_frame_queue_empty(ctx, s->base)) {
         AVFrame *output = NULL;
         av_base_inference_get_frame(ctx, s->base, &output);
         if (output) {
-            ret = ff_filter_frame(outlink, output);
-            *out_pts = output->pts + pts;
+            if (outlink) {
+                ret = ff_filter_frame(outlink, output);
+                if (out_pts)
+                    *out_pts = output->pts + pts;
+            } else {
+                av_frame_free(&output);
+            }
         }
 
         av_base_inference_send_event(ctx, s->base, INFERENCE_EVENT_EOS);
         av_usleep(5000);
     }
 
+    s->already_flushed = 1;
     return ret;
 }
 
@@ -190,7 +202,7 @@ static int activate(AVFilterContext *ctx)
             int64_t out_pts = pts;
 
             av_log(ctx, AV_LOG_INFO, "Get EOS.\n");
-            ret = flush_frame(outlink, pts, &out_pts);
+            ret = flush_frame(ctx, outlink, pts, &out_pts);
             ff_outlink_set_status(outlink, status, out_pts);
             return ret;
         }
