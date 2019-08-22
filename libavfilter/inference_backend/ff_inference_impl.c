@@ -429,11 +429,19 @@ int FFInferenceImplAddFrame(void *ctx, FFInferenceImpl *impl, AVFrame *frame) {
 
     // Collect all ROI metas into ROIMetaArray
     if (base_inference->param.is_full_frame) {
-        full_frame_meta.x = 0;
-        full_frame_meta.y = 0;
-        full_frame_meta.w = frame->width;
-        full_frame_meta.h = frame->height;
-        full_frame_meta.index = 0;
+        if (base_inference->crop_full_frame) {
+            full_frame_meta.x = base_inference->param.crop_rect.x;
+            full_frame_meta.y = base_inference->param.crop_rect.y;
+            full_frame_meta.w = base_inference->param.crop_rect.width;
+            full_frame_meta.h = base_inference->param.crop_rect.height;
+            full_frame_meta.index = 0;
+        } else {
+            full_frame_meta.x = 0;
+            full_frame_meta.y = 0;
+            full_frame_meta.w = frame->width;
+            full_frame_meta.h = frame->height;
+            full_frame_meta.index = 0;
+        }
         av_dynarray_add(&metas.roi_metas, &metas.num_metas, &full_frame_meta);
     } else {
         BBoxesArray *bboxes = NULL;

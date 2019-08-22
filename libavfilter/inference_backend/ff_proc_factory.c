@@ -177,9 +177,14 @@ static void ParseYOLOV3Output(OutputBlobContext *blob_ctx, int image_width, int 
                     continue;
                 obj = av_mallocz(sizeof(*obj));
                 av_assert0(obj);
-                DetectionObjectInit(obj, x, y, height, width, j, prob,
+                if (!base->crop_full_frame)
+                    DetectionObjectInit(obj, x, y, height, width, j, prob,
                                     (float)(image_height) / (float)(YOLOV3_INPUT_SIZE),
                                     (float)(image_width) / (float)(YOLOV3_INPUT_SIZE));
+                else
+                    DetectionObjectInit(obj, x, y, height, width, j, prob,
+                                    (float)(base->param.crop_rect.height) / (float)(YOLOV3_INPUT_SIZE),
+                                    (float)(base->param.crop_rect.width) / (float)(YOLOV3_INPUT_SIZE));
                 av_dynarray_add(&objects->objects, &objects->num_detection_objects, obj);
             }
         }
@@ -228,16 +233,24 @@ static void ExtractYOLOV3BoundingBoxes(const OutputBlobArray *blob_array, Infere
         new_bbox = (InferDetection *)av_mallocz(sizeof(*new_bbox));
         av_assert0(new_bbox);
 
-        new_bbox->x_min = object->xmin;
-        new_bbox->y_min = object->ymin;
-        new_bbox->x_max = object->xmax;
-        new_bbox->y_max = object->ymax;
+        if (!ff_base_inference->crop_full_frame) {
+            new_bbox->x_min = object->xmin;
+            new_bbox->y_min = object->ymin;
+            new_bbox->x_max = object->xmax;
+            new_bbox->y_max = object->ymax;
+        } else {
+            int x_offset = ff_base_inference->param.crop_rect.x;
+            int y_offset = ff_base_inference->param.crop_rect.y;
+            new_bbox->x_min = object->xmin + x_offset;
+            new_bbox->y_min = object->ymin + y_offset;
+            new_bbox->x_max = object->xmax + x_offset;
+            new_bbox->y_max = object->ymax + y_offset;
+        }
         new_bbox->confidence = object->confidence;
         new_bbox->label_id = object->class_id;
 
         //// TODO: handle label
         // if (labels)
-
         av_dynarray_add(&boxes->bbox, &boxes->num, new_bbox);
         av_log(NULL, AV_LOG_TRACE, "bbox %d %d %d %d\n", (int)new_bbox->x_min, (int)new_bbox->y_min,
                (int)new_bbox->x_max, (int)new_bbox->y_max);

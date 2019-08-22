@@ -61,6 +61,7 @@ struct __FFInferenceParam {
     VPPDevice vpp_device; // VPPDevice default:SW
     void *opaque;         // VADisplay for vaapi
 
+    Rectangle crop_rect;
     int is_full_frame;
 };
 
@@ -72,6 +73,7 @@ struct __FFBaseInference {
 
     // other fields
     int initialized;
+    int crop_full_frame;    // crop needed for full frame
     void *inference;        // type: FFInferenceImpl*
     void *pre_proc;         // type: PreProcFunction
     void *post_proc;        // type: PostProcFunction
@@ -217,4 +219,3 @@ int av_base_inference_get_frame(void *ctx, FFBaseInference *base, AVFrame **fram
 int av_base_inference_frame_queue_empty(void *ctx, FFBaseInference *base);
 
 void av_base_inference_send_event(void *ctx, FFBaseInference *base, FF_INFERENCE_EVENT event);
-

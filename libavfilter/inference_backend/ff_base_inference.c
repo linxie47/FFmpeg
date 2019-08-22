@@ -54,6 +54,9 @@ int av_base_inference_set_params(FFBaseInference *base, FFInferenceParam *param)
     base->inference = (void *)FFInferenceImplCreate(base);
     base->initialized = TRUE;
     base->post_proc = (void *)getPostProcFunctionByName(base->inference_id, base->param.model);
+    base->crop_full_frame =
+        (!param->crop_rect.x && !param->crop_rect.y && !param->crop_rect.width && !param->crop_rect.height) ? FALSE
+                                                                                                            : TRUE;
 
     return 0;
 }

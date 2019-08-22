@@ -53,6 +53,7 @@ typedef struct IEDetectContext {
     int    async_preproc;
     int    backend_type;
     int    already_flushed;
+    char  *crop_params;
 } IEDetectContext;
 
 static int query_formats(AVFilterContext *context)
@@ -94,6 +95,18 @@ static int config_input(AVFilterLink *inlink)
     param.infer_config    = s->infer_config;
     param.model_proc      = s->model_proc;
     param.opaque          = s->async_preproc ? (void *)MOCKER_PRE_PROC_MAGIC : 0;
+
+    if (s->crop_params) {
+        sscanf(s->crop_params, "%d|%d|%d|%d",
+                &param.crop_rect.x, &param.crop_rect.y, &param.crop_rect.width, &param.crop_rect.height);
+        if (param.crop_rect.x < 0         || param.crop_rect.y < 0      ||
+                param.crop_rect.width < 0 || param.crop_rect.height < 0 ||
+                param.crop_rect.width  + param.crop_rect.x > inlink->w  ||
+                param.crop_rect.height + param.crop_rect.y > inlink->h) {
+            av_log(ctx, AV_LOG_ERROR, "Invalid cropping parameters.\n");
+            return AVERROR(EINVAL);
+        }
+    }
 
     s->base = av_base_inference_create(ctx->filter->name);
     if (!s->base) {
@@ -229,7 +242,9 @@ static const AVOption ie_detect_options[] = {
     { "nireq",        "inference request number",        OFFSET(nireq),           AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 128,  FLAGS},
     { "batch_size",   "batch size per infer",            OFFSET(batch_size),      AV_OPT_TYPE_INT,    { .i64 = 1 },  1, 1000, FLAGS},
     { "threshold",    "threshod to filter output data",  OFFSET(threshold),       AV_OPT_TYPE_FLOAT,  { .dbl = 0.5}, 0, 1,    FLAGS},
+    { "crop_params",  "cropping rectangle format x|y|w|h", OFFSET(crop_params),   AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
     { "async_preproc", "do asynchronous preproc in inference backend", OFFSET(async_preproc), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, FLAGS },
+
     { NULL }
 };
 
