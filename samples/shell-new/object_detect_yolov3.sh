@@ -30,8 +30,7 @@ while getopts ':ab:hi:r:svd:' option; do
         h) echo "$usage"
             exit
             ;;
-        a) hw_accel="-flags unaligned -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128"
-           hw_dl="scale_vaapi=320:320:rgbp,hwdownload,format=rgbp,"
+        a) hw_accel="-threads 1 -flags unaligned -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128"
             ;;
         i) stream=$OPTARG
             ;;
@@ -121,12 +120,14 @@ batch=${batch:-1}
 
 if [ ! -z "$show" ]; then
     $BASEDIR/ffplay $debug_log -i $stream -sync video -vf \
-        "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1, \
+        "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=0|0|320|320, \
         ocv_overlay"
 else
     #gdb --args \
-    $BASEDIR/ffmpeg_g $debug_log $hw_accel -i $stream -vf \
-    "${hw_dl}ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1" \
-        -y -f null - #iemetadata /tmp/obj_detect.json
+    $BASEDIR/ffmpeg_g $debug_log $hw_accel -i $stream \
+    -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=0|0|320|320" -f null - \
+    -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=319|0|320|320" -f null -  \
+    -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=100|319|320|320" -f null - \
+    -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=0|100|320|320" -f null -
 fi
 

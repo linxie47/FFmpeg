@@ -30,8 +30,7 @@ while getopts ':ab:hi:r:svd:' option; do
         h) echo "$usage"
             exit
             ;;
-        a) hw_accel="-flags unaligned -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128"
-           hw_dl="hwdownload,format=bgr0,"
+        a) hw_accel="-threads 1 -flags unaligned -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128"
             ;;
         i) stream=$OPTARG
             ;;
@@ -140,7 +139,7 @@ if [ ! -z "$show" ]; then
 else
     #gdb --args \
     $BASEDIR/ffmpeg_g $debug_log $hw_accel \
-        -i $stream -vf "${hw_dl}ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
+        -i $stream -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
         ie_classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2:nireq=$req_num2:batch_size=$batch, \
         ie_classify=model=$CLASS_MODEL_PATH1:model_proc=$(PROC_PATH $MODEL3):device=$D_ID3:nireq=$req_num3:batch_size=$batch" \
         -f iemetadata -y /tmp/face-and-classify.json

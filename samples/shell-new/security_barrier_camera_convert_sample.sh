@@ -20,8 +20,8 @@ where:
 -b  <number>  set batch size
 -d  <devices> set devices for each model(C-CPU G-GPU V-VPU H-HDDL) e.g.CGV
 -m            set method for json output
--c            set converter type:all-to-json,detection-to-json,classification-to-json,tensor-to-file(only for reid tensor generator)
--j            set the json file path"
+-c  <convert type> set converter type: all-to-json, detection-to-json, classification-to-json, tensor-to-file(only for reid tensor generator)
+-j  <path>    set the json file path"
 
 
 if [ -z "$1" ]; then
@@ -34,8 +34,7 @@ while getopts ':ab:hi:r:svd:m:c:j:' option; do
         h) echo "$usage"
             exit
             ;;
-        a) hw_accel="-flags unaligned -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128"
-           hw_dl="hwdownload,format=bgr0,"
+        a) hw_accel="-threads 1 -flags unaligned -hwaccel vaapi -hwaccel_output_format vaapi -hwaccel_device /dev/dri/renderD128"
             ;;
         i) stream=$OPTARG
             ;;
@@ -157,9 +156,9 @@ if [ ! -z "$show" ]; then
 else
     $BASEDIR/ffmpeg $debug_log $hw_accel \
         -i $stream -vf \
-        "${hw_dl}ie_detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL1):device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
+        "ie_detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL1):device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
         ie_classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2:nireq=$req_num2:batch_size=$batch, \
         ie_classify=model=$CLASS_MODEL_PATH1:model_proc=$(PROC_PATH $MODEL3):device=$D_ID3:nireq=$req_num3:batch_size=$batch, \
         metaconvert=converter=$json_convert:method=$json_method:location=$json_path" \
-        -an -f null - #-f iemetadata -y /tmp/security.json
+        -an -f null -
 fi

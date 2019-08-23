@@ -181,18 +181,22 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
     }
 
     if (configs) {
-        const char *resize_by_vino = NULL, *multi_device_list = NULL;
+        const char *resize_by_vino = NULL, *multi_device_list = NULL, *hetero_device_list = NULL;
+
         ie_core_set_config(vino->core, configs, devices);
         resize_by_vino = ie_core_get_config(vino->core, KEY_RESIZE_BY_INFERENCE);
         vino->resize_by_inference = (resize_by_vino && !strcmp(resize_by_vino, "TRUE")) ? 1 : 0;
 
         multi_device_list = ie_core_get_config(vino->core, "MULTI_DEVICE_PRIORITIES");
-        if (strstr(devices, "CPU") || (multi_device_list && strstr(multi_device_list, "CPU")))
+        hetero_device_list = ie_core_get_config(vino->core, "TARGET_FALLBACK");
+        if (multi_device_list && strstr(multi_device_list, "CPU") ||
+            hetero_device_list && strstr(hetero_device_list, "CPU")) {
             cpu_extension_needed = 1;
+        }
     }
 
     // Extension for custom layers
-    if (cpu_extension_needed) {
+    if (cpu_extension_needed || strstr(devices, "CPU")) {
         const char *cpu_ext = ie_core_get_config(vino->core, KEY_CPU_EXTENSION);
         ie_core_add_extension(vino->core, cpu_ext, "CPU");
         VAII_DEBUG("Cpu extension loaded!");
