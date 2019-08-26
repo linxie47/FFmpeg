@@ -76,6 +76,7 @@ static void infer_labels_buffer_free(void *opaque, uint8_t *data)
     for (i = 0; i < labels->num; i++)
         av_freep(&labels->label[i]);
 
+    av_free(labels->label);
     av_free(data);
 }
 
@@ -205,6 +206,7 @@ static av_cold int identify_init(AVFilterContext *ctx)
 
     s->labels = ref;
     av_free(dup);
+    json_object_put(entry);
 
     return 0;
 }
