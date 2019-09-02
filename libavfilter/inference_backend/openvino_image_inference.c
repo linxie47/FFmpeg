@@ -385,6 +385,11 @@ static int OpenVINOImageInferenceIsQueueFull(ImageInferenceContext *ctx) {
     return SafeQueueEmpty(vino->freeRequests);
 }
 
+static int OpenVINOImageInferenceResourceStatus(ImageInferenceContext *ctx) {
+    OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
+    return SafeQueueSize(vino->freeRequests) * vino->batch_size;
+}
+
 static void OpenVINOImageInferenceFlush(ImageInferenceContext *ctx) {
     OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
     BatchRequest *request = NULL;
@@ -562,6 +567,7 @@ ImageInference image_inference_openvino = {
     .GetModelName = OpenVINOImageInferenceGetModelName,
     .GetModelInputInfo = OpenVINOImageInferenceGetModelInputInfo,
     .IsQueueFull = OpenVINOImageInferenceIsQueueFull,
+    .ResourceStatus = OpenVINOImageInferenceResourceStatus,
     .Flush = OpenVINOImageInferenceFlush,
     .Close = OpenVINOImageInferenceClose,
 };

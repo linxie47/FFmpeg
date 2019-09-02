@@ -140,6 +140,12 @@ static int ImageInferenceAsyncPreprocIsQueueFull(ImageInferenceContext *ctx) {
     return infer->IsQueueFull(infer_ctx);
 }
 
+static int ImageInferenceResourceStatus(ImageInferenceContext *ctx) {
+    ImageInferenceAsyncPreproc *async_preproc = (ImageInferenceAsyncPreproc *)ctx->priv;
+    ImageInferenceContext *infer_ctx = async_preproc->actual;
+    return infer_ctx->inference->ResourceStatus(infer_ctx);
+}
+
 static void ImageInferenceAsyncPreprocFlush(ImageInferenceContext *ctx) {
     ImageInferenceAsyncPreproc *async_preproc = (ImageInferenceAsyncPreproc *)ctx->priv;
 
@@ -213,6 +219,7 @@ ImageInference image_inference_async_preproc = {
     .SubmitImage = ImageInferenceAsyncPreprocSubmtImage,
     .GetModelName = ImageInferenceAsyncPreprocGetModelName,
     .IsQueueFull = ImageInferenceAsyncPreprocIsQueueFull,
+    .ResourceStatus = ImageInferenceResourceStatus,
     .Flush = ImageInferenceAsyncPreprocFlush,
     .Close = ImageInferenceAsyncPreprocClose,
 };

@@ -300,6 +300,9 @@ void av_log_default_callback(void *avcl, int level, const char *fmt,
 int av_profiling_get(void);
 void av_profiling_set(int arg);
 
+int av_load_balance_get(void);
+void av_load_balance_set(int arg);
+
 /**
  * Return the context name
  *

@@ -4296,6 +4296,19 @@ static int process_input(int file_index)
 
     for (i = 0; i < ifile->nb_streams; i++) {
         ist = input_streams[ifile->ist_index + i];
+
+        if (load_balance && ist->filters && ist->filters[0]->filter) {
+            ret = avfilter_chain_occupation(ist->filters[0]->filter);
+            if (ret >= load_balance) {
+                for (j = 0; j < nb_filtergraphs; j++) {
+                    FilterGraph *fg = filtergraphs[j];
+                    avfilter_graph_set_parsed(fg->graph);
+                }
+                usleep(1000);
+                return 0;
+            }
+        }
+
         avctx = ist->dec_ctx;
         if (avctx && avctx->hw_frames_ctx) {
             AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;

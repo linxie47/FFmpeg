@@ -43,6 +43,7 @@
 
 static int flush_frame(AVFilterContext *ctx, AVFilterLink *outlink, int64_t pts, int64_t *out_pts);
 
+
 typedef struct IEDetectContext {
     const AVClass *class;
 
@@ -176,6 +177,69 @@ static int flush_frame(AVFilterContext *ctx, AVFilterLink *outlink, int64_t pts,
     return ret;
 }
 
+static int load_balance(AVFilterContext *ctx)
+{
+    AVFilterLink *inlink = ctx->inputs[0];
+    AVFilterLink *outlink = ctx->outputs[0];
+    IEDetectContext *s = ctx->priv;
+    AVFrame *in = NULL, *output = NULL;
+    int64_t pts;
+    int ret, status;
+    int resource, got_frames = 0;
+    int get_frame_status;
+
+    FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
+
+    // drain all processed frames
+    do {
+        get_frame_status = av_base_inference_get_frame(ctx, s->base, &output);
+        if (output) {
+            int ret_val = ff_filter_frame(outlink, output);
+            if (ret_val < 0)
+                return ret_val;
+
+            got_frames = 1;
+            output = NULL;
+        }
+    } while (get_frame_status == 0);
+
+    status = ff_outlink_get_status(inlink);
+    if (status)
+        resource = ff_inlink_queued_frames(inlink);
+    else
+        resource = av_base_inference_resource_status(ctx, s->base);
+
+    while (resource > 0) {
+        ret = ff_inlink_consume_frame(inlink, &in);
+        if (ret < 0)
+            return ret;
+        if (ret == 0)
+            break;
+        if (ret > 0) {
+            av_base_inference_send_frame(ctx, s->base, in);
+        }
+        resource--;
+    }
+
+    if (!status && got_frames)
+        return 0;
+
+    if (ff_inlink_acknowledge_status(inlink, &status, &pts)) {
+        if (status == AVERROR_EOF) {
+            int64_t out_pts = pts;
+
+            av_log(ctx, AV_LOG_INFO, "Get EOS.\n");
+            ret = flush_frame(ctx, outlink, pts, &out_pts);
+            ff_outlink_set_status(outlink, status, out_pts);
+            return ret;
+        }
+    }
+
+    FF_FILTER_FORWARD_WANTED(outlink, inlink);
+
+    return FFERROR_NOT_READY;
+}
+
 static int activate(AVFilterContext *ctx)
 {
     AVFilterLink *inlink = ctx->inputs[0];
@@ -185,6 +249,9 @@ static int activate(AVFilterContext *ctx)
     int64_t pts;
     int ret, status;
     int got_frame = 0;
+
+    if (av_load_balance_get())
+        return load_balance(ctx);
 
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 

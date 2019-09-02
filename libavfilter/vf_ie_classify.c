@@ -163,6 +163,104 @@ static int flush_frame(AVFilterContext *ctx, AVFilterLink *outlink, int64_t pts,
     return ret;
 }
 
+static int classify_num_of_roi(AVFrame *frame) {
+    int roi_num = 0;
+    BBoxesArray *bboxes = NULL;
+    InferDetectionMeta *detect_meta = NULL;
+    AVFrameSideData *side_data;
+
+    if (!frame)
+        return 0;
+
+    side_data = av_frame_get_side_data(frame, AV_FRAME_DATA_INFERENCE_DETECTION);
+    if (side_data) {
+        detect_meta = (InferDetectionMeta *)(side_data->data);
+        av_assert0(detect_meta);
+        bboxes = detect_meta->bboxes;
+        roi_num = bboxes ? bboxes->num : 0;
+    }
+
+    return roi_num;
+}
+
+static int load_balance(AVFilterContext *ctx)
+{
+    AVFilterLink *inlink = ctx->inputs[0];
+    AVFilterLink *outlink = ctx->outputs[0];
+    IEClassifyContext *s = ctx->priv;
+    AVFrame *in = NULL, *output = NULL;
+    int64_t pts;
+    int i, ret, status, idx;
+    int needed, resource, prepared, got_frames = 0;
+
+    FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
+
+    while (av_base_inference_get_frame(ctx, s->base, &output) == 0) {
+        if (output) {
+            status = ff_filter_frame(outlink, output);
+            if (status < 0)
+                return status;
+            got_frames = 1;
+            output = NULL;
+        }
+    }
+
+    status = ff_outlink_get_status(inlink);
+    if (status)
+        needed = ff_inlink_queued_frames(inlink);
+    else {
+        needed = 0;
+        prepared = 0;
+        idx = ff_inlink_queued_frames(inlink);
+        resource = av_base_inference_resource_status(ctx, s->base);
+        for (i = 0; i < idx; i++) {
+            int num_roi;
+            in = ff_inlink_peek_frame(inlink, i);
+            num_roi = classify_num_of_roi(in);
+            if (num_roi > s->nireq * s->batch_size) {
+                needed = resource < s->nireq ? 0 : 1;
+                break;
+            }
+            else {
+                if (num_roi == 0 || (resource - prepared) >= num_roi) {
+                    needed++;
+                    prepared += num_roi;
+                    continue;
+                } else
+                    break;
+            }
+        }
+    }
+
+    while (needed > 0) {
+        ret = ff_inlink_consume_frame(inlink, &in);
+        if (ret < 0)
+            return ret;
+        if (ret > 0) {
+            av_base_inference_send_frame(ctx, s->base, in);
+        }
+        needed--;
+    }
+
+    if (!status && got_frames)
+        return 0;
+
+    if (ff_inlink_acknowledge_status(inlink, &status, &pts)) {
+        if (status == AVERROR_EOF) {
+            int64_t out_pts = pts;
+
+            av_log(ctx, AV_LOG_INFO, "Get EOS.\n");
+            ret = flush_frame(ctx, outlink, pts, &out_pts);
+            ff_outlink_set_status(outlink, status, out_pts);
+            return ret;
+        }
+    }
+
+    FF_FILTER_FORWARD_WANTED(outlink, inlink);
+
+    return FFERROR_NOT_READY;
+}
+
 static int activate(AVFilterContext *ctx)
 {
     AVFilterLink *inlink = ctx->inputs[0];
@@ -172,6 +270,9 @@ static int activate(AVFilterContext *ctx)
     int64_t pts;
     int ret, status;
     int got_frames = 0;
+
+    if (av_load_balance_get())
+        return load_balance(ctx);
 
     FF_FILTER_FORWARD_STATUS_BACK(outlink, inlink);
 

@@ -219,4 +219,6 @@ int av_base_inference_get_frame(void *ctx, FFBaseInference *base, AVFrame **fram
 
 int av_base_inference_frame_queue_empty(void *ctx, FFBaseInference *base);
 
+int av_base_inference_resource_status(void *ctx, FFBaseInference *base);
+
 void av_base_inference_send_event(void *ctx, FFBaseInference *base, FF_INFERENCE_EVENT event);

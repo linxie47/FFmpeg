@@ -1164,6 +1164,13 @@ char *avfilter_graph_dump(AVFilterGraph *graph, const char *options);
 int avfilter_graph_request_oldest(AVFilterGraph *graph);
 
 /**
+ * To get the filter chain queue frames occupation number.
+ *
+ * @return the number of buffered frames in the chain
+ */
+int avfilter_chain_occupation(AVFilterContext *avctx);
+
+/**
  * Set parsed filter to be ready on a filter graph.
  */
 int avfilter_graph_set_parsed(AVFilterGraph *graph);

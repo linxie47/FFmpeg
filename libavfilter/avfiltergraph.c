@@ -1453,6 +1453,29 @@ int avfilter_graph_request_oldest(AVFilterGraph *graph)
     return 0;
 }
 
+int avfilter_chain_occupation(AVFilterContext *avctx)
+{
+    AVFilterLink *link = NULL;
+    int i, frm_num = 0;
+
+    if (!avctx)
+        return 0;
+
+    while (avctx) {
+        if (avctx->nb_inputs) {
+            link = avctx->inputs[0];
+            frm_num += ff_framequeue_queued_frames(&link->fifo);
+        }
+        if (avctx->nb_outputs) {
+            link = avctx->outputs[0];
+            avctx = link->dst;
+        } else
+            break;
+    }
+
+    return frm_num;
+}
+
 int ff_filter_graph_run_once(AVFilterGraph *graph)
 {
     AVFilterContext *filter;

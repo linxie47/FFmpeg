@@ -99,6 +99,13 @@ int av_base_inference_frame_queue_empty(void *ctx, FFBaseInference *base) {
     return FFInferenceImplGetQueueSize(ctx, (FFInferenceImpl *)base->inference) == 0 ? TRUE : FALSE;
 }
 
+int av_base_inference_resource_status(void *ctx, FFBaseInference *base) {
+    if (!base)
+        return AVERROR(EINVAL);
+
+    return FFInferenceImplResourceStatus(ctx, (FFInferenceImpl *)base->inference);
+}
+
 void av_base_inference_send_event(void *ctx, FFBaseInference *base, FF_INFERENCE_EVENT event) {
     if (!base)
         return;

@@ -73,6 +73,8 @@ struct ImageInference {
 
     int (*IsQueueFull)(ImageInferenceContext *ctx);
 
+    int (*ResourceStatus)(ImageInferenceContext *ctx);
+
     void (*Flush)(ImageInferenceContext *ctx);
 
     void (*Close)(ImageInferenceContext *ctx);

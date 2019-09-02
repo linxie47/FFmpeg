@@ -533,6 +533,10 @@ size_t FFInferenceImplGetQueueSize(void *ctx, FFInferenceImpl *impl) {
     return out->size(out) + pro->size(pro);
 }
 
+size_t FFInferenceImplResourceStatus(void *ctx, FFInferenceImpl *impl) {
+    return impl->model->infer_ctx->inference->ResourceStatus(impl->model->infer_ctx);
+}
+
 void FFInferenceImplSinkEvent(void *ctx, FFInferenceImpl *impl, FF_INFERENCE_EVENT event) {
     if (event == INFERENCE_EVENT_EOS) {
         impl->model->infer_ctx->inference->Flush(impl->model->infer_ctx);
