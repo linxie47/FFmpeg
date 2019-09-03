@@ -24,7 +24,7 @@ typedef struct OpenVINOImageInference {
     CallbackFunc callback;
 
     // Inference Engine
-    ie_plugin_t *plugin;
+    ie_core_t *core;
     ie_network_t *network;
     ie_input_info_t **inputs;
     ie_output_info_t **outputs;

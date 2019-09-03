@@ -174,29 +174,27 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
         return -1;
     }
 
-    vino->plugin = ie_plugin_create(devices);
-    if (!vino->plugin) {
-        VAII_ERROR("Create plugin failed!");
+    vino->core = ie_core_create();
+    if (!vino->core) {
+        VAII_ERROR("Create ie core failed!");
         return -1;
     }
 
     if (configs) {
         const char *resize_by_vino = NULL;
-        ie_plugin_set_config(vino->plugin, configs);
-        // printf("KEY_CPU_THREADS_NUM:%s\n", ie_plugin_get_config(vino->plugin, KEY_CPU_THREADS_NUM));
-        // printf("KEY_CPU_THROUGHPUT_STREAMS:%s\n", ie_plugin_get_config(vino->plugin, KEY_CPU_THROUGHPUT_STREAMS));
-        resize_by_vino = ie_plugin_get_config(vino->plugin, KEY_RESIZE_BY_INFERENCE);
+        ie_core_set_config(vino->core, configs, devices);
+        resize_by_vino = ie_core_get_config(vino->core, KEY_RESIZE_BY_INFERENCE);
         vino->resize_by_inference = (resize_by_vino && !strcmp(resize_by_vino, "TRUE")) ? 1 : 0;
     }
 
     // Extension for custom layers
     if (strstr(devices, "CPU")) {
-        const char *cpu_ext = ie_plugin_get_config(vino->plugin, KEY_CPU_EXTENSION);
-        ie_plugin_add_cpu_extension(vino->plugin, cpu_ext);
+        const char *cpu_ext = ie_core_get_config(vino->core, KEY_CPU_EXTENSION);
+        ie_core_add_extension(vino->core, cpu_ext, "CPU");
     }
 
     // Load network
-    vino->network = ie_network_create(vino->plugin, model, NULL);
+    vino->network = ie_network_create(vino->core, model, NULL);
     if (!vino->network) {
         VAII_ERROR("Create network failed!");
         goto err;
@@ -250,7 +248,7 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
         goto err;
     }
 
-    vino->infer_requests = ie_network_create_infer_requests(vino->network, nireq);
+    vino->infer_requests = ie_network_create_infer_requests(vino->network, nireq, devices);
     if (!vino->infer_requests) {
         VAII_ERROR("Creat infer requests failed!");
         goto err;
@@ -322,7 +320,7 @@ err:
     if (vino->workingRequests)
         SafeQueueDestroy(vino->workingRequests);
     ie_network_destroy(vino->network);
-    ie_plugin_destroy(vino->plugin);
+    ie_core_destroy(vino->core);
     return -1;
 }
 
@@ -462,7 +460,7 @@ static void OpenVINOImageInferenceClose(ImageInferenceContext *ctx) {
     }
 
     ie_network_destroy(vino->network);
-    ie_plugin_destroy(vino->plugin);
+    ie_core_destroy(vino->core);
 }
 
 static void *WorkingFunction(void *arg) {
