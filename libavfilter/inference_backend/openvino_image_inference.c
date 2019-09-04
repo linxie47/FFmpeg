@@ -160,7 +160,7 @@ static void SubmitImagePreProcess(ImageInferenceContext *ctx, const BatchRequest
 static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType type, const char *devices,
                                         const char *model, int batch_size, int nireq, const char *configs,
                                         void *allocator, CallbackFunc callback) {
-    int ret = 0;
+    int ret = 0, cpu_extension_needed = 0;
     OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
     VAII_DEBUG("Create");
 
@@ -181,16 +181,21 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
     }
 
     if (configs) {
-        const char *resize_by_vino = NULL;
+        const char *resize_by_vino = NULL, *multi_device_list = NULL;
         ie_core_set_config(vino->core, configs, devices);
         resize_by_vino = ie_core_get_config(vino->core, KEY_RESIZE_BY_INFERENCE);
         vino->resize_by_inference = (resize_by_vino && !strcmp(resize_by_vino, "TRUE")) ? 1 : 0;
+
+        multi_device_list = ie_core_get_config(vino->core, "MULTI_DEVICE_PRIORITIES");
+        if (strstr(devices, "CPU") || (multi_device_list && strstr(multi_device_list, "CPU")))
+            cpu_extension_needed = 1;
     }
 
     // Extension for custom layers
-    if (strstr(devices, "CPU")) {
+    if (cpu_extension_needed) {
         const char *cpu_ext = ie_core_get_config(vino->core, KEY_CPU_EXTENSION);
         ie_core_add_extension(vino->core, cpu_ext, "CPU");
+        VAII_DEBUG("Cpu extension loaded!");
     }
 
     // Load network
