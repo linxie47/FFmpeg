@@ -151,6 +151,10 @@ static void ImageInferenceAsyncPreprocFlush(ImageInferenceContext *ctx) {
 
     ImageInferenceContext *infer_ctx = async_preproc->actual;
     const ImageInference *infer = infer_ctx->inference;
+    // Since async image preproc is working in another independent thread,
+    // have to wait for all working images be processed and sent to inference engine,
+    // or the flushing cannot assure the un-batched frames can be used and released
+    SafeQueueWaitEmpty(async_preproc->workingImages);
     return infer->Flush(infer_ctx);
 }
 
