@@ -88,7 +88,7 @@ static av_cold int metaconvert_init(AVFilterContext *ctx) {
 
 static av_cold void metaconvert_uninit(AVFilterContext *ctx) {
     MetaConvertContext *s = ctx->priv;
-    const char *tail = "}";
+    const char *tail = "\n}";
 
     fwrite(tail, sizeof(char), strlen(tail) / sizeof(char), s->f);
     fclose(s->f);
@@ -106,13 +106,21 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in) {
 
     ret = s->convert_func(ctx, in, info_object);
     if (ret) {
-        proc_json = json_object_to_json_string_ext(info_object, JSON_C_TO_STRING_PRETTY);
+        int64_t nano_ts = 1000000000;
+        char timestamp[1024] = {0};
+
+        nano_ts = in->pts * (nano_ts * inlink->time_base.num / inlink->time_base.den);
+        snprintf(timestamp, sizeof(timestamp), "%"PRIu64"", nano_ts);
+
+        json_object_object_add(info_object, "timestamp", json_object_new_string(timestamp));
 
         if(s->frame_number == 0) {
             fwrite(head, sizeof(char), strlen(head) / sizeof(char), s->f);
         } else {
             fwrite(str_insert, sizeof(char), strlen(str_insert) / sizeof(char), s->f);
         }
+
+        proc_json = json_object_to_json_string_ext(info_object, JSON_C_TO_STRING_PRETTY);
         fwrite(proc_json, sizeof(char), strlen(proc_json) / sizeof(char), s->f);
 
         s->frame_number++;
