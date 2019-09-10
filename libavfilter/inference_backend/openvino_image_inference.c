@@ -209,7 +209,6 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
         goto err;
     }
 
-    ie_network_set_batch(vino->network, batch_size);
     vino->batch_size = batch_size;
 
     // Check model input
@@ -241,6 +240,12 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
     }
 
     ie_network_get_all_inputs(vino->network, vino->inputs);
+
+    if (batch_size > 1) {
+        for (int i = 0; i < vino->num_inputs; i++)
+            ie_network_input_reshape(vino->network, vino->inputs[i], batch_size);
+    }
+
     ie_network_get_all_outputs(vino->network, vino->outputs);
 
     ie_input_info_set_precision(vino->inputs[0], "U8");
