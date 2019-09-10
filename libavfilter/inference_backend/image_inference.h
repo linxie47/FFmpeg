@@ -129,7 +129,8 @@ __DECLARE_CONFIG_KEY(RESIZE_BY_INFERENCE);    // experimental, don't use
 #define KEY_CPU_EXTENSION __STRING(CPU_EXTENSION)                   // library with implementation of custom layers
 #define KEY_CPU_THREADS_NUM __STRING(CPU_THREADS_NUM)               // threads number CPU plugin use for inference
 #define KEY_CPU_THROUGHPUT_STREAMS __STRING(CPU_THROUGHPUT_STREAMS) // number inference requests running in parallel
-#define KEY_RESIZE_BY_INFERENCE __STRING(RESIZE_BY_INFERENCE)       // experimental, don't use
+#define KEY_PRE_PROCESSOR_TYPE __STRING(PRE_PROCESSOR_TYPE)         // preprocessor, e.g. ie, ffmpeg, opencv, g-api etc.
+#define KEY_IMAGE_FORMAT __STRING(IMAGE_FORMAT)                     // image format, e.g. NV12, BGR, RGB etc.
 #endif
 
 const ImageInference *image_inference_get_by_name(const char *name);

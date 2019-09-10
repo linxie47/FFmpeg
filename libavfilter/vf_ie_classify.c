@@ -59,7 +59,7 @@ static int query_formats(AVFilterContext *context)
 {
     AVFilterFormats *formats_list;
     const enum AVPixelFormat pixel_formats[] = {
-        AV_PIX_FMT_YUV420P,
+        AV_PIX_FMT_YUV420P,  AV_PIX_FMT_NV12,
         AV_PIX_FMT_BGR24,    AV_PIX_FMT_BGRA,
         AV_PIX_FMT_BGR0,     AV_PIX_FMT_RGBP,
         AV_PIX_FMT_BGRA,     AV_PIX_FMT_VAAPI,

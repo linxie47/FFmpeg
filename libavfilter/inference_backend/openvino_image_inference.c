@@ -31,6 +31,28 @@ static inline int getNumberChannels(int format) {
     return 0;
 }
 
+static IEColorFormat FormatNameToIEColorFormat(const char *format) {
+    static const char *formats[] = {"NV12", "RGB", "BGR", "RGBX", "BGRX", "RGBA", "BGRA"};
+    const IEColorFormat ie_color_formats[] = {NV12, RGB, BGR, RGBX, BGRX, RGBX, BGRX};
+
+    int num_formats = sizeof(formats) / sizeof(formats[0]);
+    for (int i = 0; i < num_formats; i++) {
+        if (!strcmp(format, formats[i]))
+            return ie_color_formats[i];
+    }
+
+    VAII_ERROR("Unsupported color format by Inference Engine preprocessing");
+    return RAW;
+}
+
+static inline void RectToIERoi(roi_t *roi, const Rectangle *rect) {
+    roi->id = 0;
+    roi->posX = rect->x;
+    roi->posY = rect->y;
+    roi->sizeX = rect->width;
+    roi->sizeY = rect->height;
+}
+
 static void GetNextImageBuffer(ImageInferenceContext *ctx, const BatchRequest *request, Image *image) {
     OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
     const char *input_name;
@@ -128,7 +150,23 @@ static void SubmitImagePreProcess(ImageInferenceContext *ctx, const BatchRequest
     OpenVINOImageInference *vino = (OpenVINOImageInference *)ctx->priv;
 
     if (vino->resize_by_inference) {
-        // TODO: image to Blob
+        const char *input_name = vino->inputs[0]->name;
+        // ie preprocess can only support system memory right now
+        assert(pSrc->type == MEM_TYPE_SYSTEM);
+        if (pSrc->format != FOURCC_NV12) {
+            roi_t roi, *_roi = NULL;
+            if (pSrc->rect.width != 0 && pSrc->rect.height != 0) {
+                RectToIERoi(&roi, &pSrc->rect);
+                _roi = &roi;
+            }
+            infer_request_set_blob(request->infer_request, input_name, pSrc->width, pSrc->height, vino->ie_color_format,
+                                   (uint8_t **)pSrc->planes, _roi);
+        } else {
+            Image src = {};
+            src = ApplyCrop(pSrc);
+            infer_request_set_blob(request->infer_request, input_name, src.width, src.height, vino->ie_color_format,
+                                   src.planes, NULL);
+        }
     } else {
         Image src = {};
         Image dst = {};
@@ -181,11 +219,11 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
     }
 
     if (configs) {
-        const char *resize_by_vino = NULL, *multi_device_list = NULL, *hetero_device_list = NULL;
+        const char *pre_processor_name = NULL, *multi_device_list = NULL, *hetero_device_list = NULL;
 
         ie_core_set_config(vino->core, configs, devices);
-        resize_by_vino = ie_core_get_config(vino->core, KEY_RESIZE_BY_INFERENCE);
-        vino->resize_by_inference = (resize_by_vino && !strcmp(resize_by_vino, "TRUE")) ? 1 : 0;
+        pre_processor_name = ie_core_get_config(vino->core, KEY_PRE_PROCESSOR_TYPE);
+        vino->resize_by_inference = (pre_processor_name && !strcmp(pre_processor_name, "ie")) ? 1 : 0;
 
         multi_device_list = ie_core_get_config(vino->core, "MULTI_DEVICE_PRIORITIES");
         hetero_device_list = ie_core_get_config(vino->core, "TARGET_FALLBACK");
@@ -249,11 +287,15 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
     ie_network_get_all_outputs(vino->network, vino->outputs);
 
     ie_input_info_set_precision(vino->inputs[0], "U8");
+    ie_input_info_set_layout(vino->inputs[0], "NCHW");
     if (vino->resize_by_inference) {
-        // TODO: set openvino preprocess algorithm
-        ie_input_info_set_layout(vino->inputs[0], "NHWC");
-    } else {
-        ie_input_info_set_layout(vino->inputs[0], "NCHW");
+        const char *image_format_name = ie_core_get_config(vino->core, KEY_IMAGE_FORMAT);
+        if (image_format_name == NULL) {
+            VAII_ERROR("Input image format name must be specified!");
+            goto err;
+        }
+        vino->ie_color_format = FormatNameToIEColorFormat(image_format_name);
+        ie_input_info_set_preprocess(vino->inputs[0], vino->network, RESIZE_BILINEAR, vino->ie_color_format);
     }
 
     // Create infer requests

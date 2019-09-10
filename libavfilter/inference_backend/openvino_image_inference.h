@@ -20,6 +20,7 @@ typedef struct BatchRequest {
 
 typedef struct OpenVINOImageInference {
     int resize_by_inference;
+    IEColorFormat ie_color_format;
 
     CallbackFunc callback;
 
