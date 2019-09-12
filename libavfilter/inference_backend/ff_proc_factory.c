@@ -178,6 +178,7 @@ static void ExtractYOLOV3BoundingBoxes(const OutputBlobArray *blob_array, Infere
     DetectionObjectArray obj_array = {};
     BBoxesArray *boxes;
     AVBufferRef *ref;
+    AVBufferRef *labels = NULL;
     AVFrame *av_frame;
     AVFrameSideData *side_data;
     InferDetectionMeta *detect_meta;
@@ -187,6 +188,15 @@ static void ExtractYOLOV3BoundingBoxes(const OutputBlobArray *blob_array, Infere
 
     for (int n = 0; n < blob_array->num_blobs; n++) {
         OutputBlobContext *blob_ctx = blob_array->output_blobs[n];
+        const OutputBlobMethod *blob = blob_ctx->output_blob_method;
+        const char *layer_name = blob->GetOutputLayerName(blob_ctx);
+
+        if (model_postproc) {
+            int idx = findModelPostProcByName(model_postproc, layer_name);
+            if (idx != MAX_MODEL_OUTPUT)
+                labels = model_postproc->procs[idx].labels;
+        }
+
         av_assert0(blob_ctx);
         ParseYOLOV3Output(blob_ctx, infer_roi_array->infer_ROIs[0]->roi.w, infer_roi_array->infer_ROIs[0]->roi.h,
                           &obj_array, ff_base_inference);
@@ -230,8 +240,9 @@ static void ExtractYOLOV3BoundingBoxes(const OutputBlobArray *blob_array, Infere
         new_bbox->confidence = object->confidence;
         new_bbox->label_id = object->class_id;
 
-        //// TODO: handle label
-        // if (labels)
+        if (labels)
+            new_bbox->label_buf = av_buffer_ref(labels);
+
         av_dynarray_add(&boxes->bbox, &boxes->num, new_bbox);
         av_log(NULL, AV_LOG_TRACE, "bbox %d %d %d %d\n", (int)new_bbox->x_min, (int)new_bbox->y_min,
                (int)new_bbox->x_max, (int)new_bbox->y_max);
