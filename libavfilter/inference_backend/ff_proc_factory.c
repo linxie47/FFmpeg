@@ -127,10 +127,31 @@ static void ParseYOLOV3Output(OutputBlobContext *blob_ctx, int image_width, int 
     const float anchors[] = {10.0, 13.0, 16.0,  30.0,  33.0, 23.0,  30.0,  61.0,  62.0,
                              45.0, 59.0, 119.0, 116.0, 90.0, 156.0, 198.0, 373.0, 326.0};
     int side = out_blob_h;
+    int anchor_offset = 0;
     int side_square = side * side;
     const float *output_blob = (const float *)blob->GetData(blob_ctx);
 
     av_assert0(out_blob_h == out_blob_w);
+    switch (side) {
+    case 13:
+    case 10:
+    case 19:
+        anchor_offset = 2 * 6;
+        break;
+    case 26:
+    case 20:
+    case 38:
+        anchor_offset = 2 * 3;
+        break;
+    case 52:
+    case 40:
+    case 76:
+        anchor_offset = 2 * 0;
+        break;
+    default:
+        av_log(NULL, AV_LOG_ERROR, "Invaild output size\n");
+        return;
+    }
 
     for (int i = 0; i < side_square; ++i) {
         int row = i / side;
@@ -147,8 +168,8 @@ static void ParseYOLOV3Output(OutputBlobContext *blob_ctx, int image_width, int 
 
             x = (col + output_blob[box_index + 0 * side_square]) / side * YOLOV3_INPUT_SIZE;
             y = (row + output_blob[box_index + 1 * side_square]) / side * YOLOV3_INPUT_SIZE;
-            width = exp(output_blob[box_index + 2 * side_square]) * anchors[2 * n];
-            height = exp(output_blob[box_index + 3 * side_square]) * anchors[2 * n + 1];
+            width = exp(output_blob[box_index + 2 * side_square]) * anchors[anchor_offset + 2 * n];
+            height = exp(output_blob[box_index + 3 * side_square]) * anchors[anchor_offset + 2 * n + 1];
 
             for (int j = 0; j < classes; ++j) {
                 int class_index = EntryIndex(side, coords, classes, n * side_square + i, coords + 1 + j);
@@ -239,6 +260,9 @@ static void ExtractYOLOV3BoundingBoxes(const OutputBlobArray *blob_array, Infere
         }
         new_bbox->confidence = object->confidence;
         new_bbox->label_id = object->class_id;
+
+        new_bbox->x_min = new_bbox->x_min < 0 ? 0 : new_bbox->x_min;
+        new_bbox->y_min = new_bbox->y_min < 0 ? 0 : new_bbox->y_min;
 
         if (labels)
             new_bbox->label_buf = av_buffer_ref(labels);
