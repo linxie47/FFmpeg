@@ -6,6 +6,7 @@
 
 #include "model_proc.h"
 #include "libavutil/avassert.h"
+#include "logger.h"
 #include <json-c/json.h>
 
 // helper functions
@@ -115,7 +116,7 @@ int model_proc_parse_input_preproc(const void *json, ModelInputPreproc *m_prepro
 
     ret = json_object_object_get_ex((json_object *)json, "input_preproc", &preproc);
     if (!ret) {
-        av_log(NULL, AV_LOG_DEBUG, "No input_preproc.\n");
+        VAII_DEBUG("No input_preproc.\n");
         return 0;
     }
 
@@ -129,7 +130,7 @@ int model_proc_parse_input_preproc(const void *json, ModelInputPreproc *m_prepro
         if (json_object_get_string(color) == NULL)
             return -1;
 
-        av_log(NULL, AV_LOG_INFO, "Color Format:\"%s\"\n", json_object_get_string(color));
+        VAII_LOGI("Color Format:\"%s\"\n", json_object_get_string(color));
 
         if (!strcmp(json_object_get_string(color), "BGR"))
             m_preproc->color_format = AV_PIX_FMT_BGR24;
@@ -144,7 +145,7 @@ int model_proc_parse_input_preproc(const void *json, ModelInputPreproc *m_prepro
         if (json_object_get_string(object_class) == NULL)
             return -1;
 
-        av_log(NULL, AV_LOG_INFO, "Object_class:\"%s\"\n", json_object_get_string(object_class));
+        VAII_LOGI("Object_class:\"%s\"\n", json_object_get_string(object_class));
 
         m_preproc->object_class = (char *)json_object_get_string(object_class);
     }
@@ -166,7 +167,7 @@ int model_proc_parse_output_postproc(const void *json, ModelOutputPostproc *m_po
 
     ret = json_object_object_get_ex((json_object *)json, "output_postproc", &postproc);
     if (!ret) {
-        av_log(NULL, AV_LOG_DEBUG, "No output_postproc.\n");
+        VAII_DEBUG("No output_postproc.\n");
         return 0;
     }
 

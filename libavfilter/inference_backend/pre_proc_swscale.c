@@ -5,6 +5,7 @@
  ******************************************************************************/
 
 #include "pre_proc.h"
+#include "logger.h"
 #include <assert.h>
 #include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
@@ -72,7 +73,7 @@ static void DumpRGBpToFile(const Image *out_image) {
 }
 
 static inline void DumpImageInfo(const Image *p) {
-    av_log(NULL, AV_LOG_INFO, "Image w:%d h:%d f:%x, plane: %p %p %p  stride: %d %d %d \n", p->width, p->height,
+    VAII_LOGI("Image w:%d h:%d f:%x, plane: %p %p %p  stride: %d %d %d \n", p->width, p->height,
            p->format, p->planes[0], p->planes[1], p->planes[2], p->stride[0], p->stride[1], p->stride[2]);
 }
 

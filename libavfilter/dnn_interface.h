@@ -30,7 +30,7 @@
 
 typedef enum {DNN_SUCCESS, DNN_ERROR} DNNReturnType;
 
-typedef enum {DNN_NATIVE, DNN_TF, DNN_INTEL_IE} DNNBackendType;
+typedef enum {DNN_NATIVE, DNN_TF} DNNBackendType;
 
 typedef struct DNNData{
     float *data;

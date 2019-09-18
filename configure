@@ -238,8 +238,6 @@ External library support:
   --enable-libgsm          enable GSM de/encoding via libgsm [no]
   --enable-libiec61883     enable iec61883 via libiec61883 [no]
   --enable-libilbc         enable iLBC de/encoding via libilbc [no]
-  --enable-libinference_engine enable intel inference engine as a DNN module
-                               backend [no]
   --enable-libinference_engine_c_api enable dldt inference engine c api [no]
   --enable-libjack         enable JACK audio sound server [no]
   --enable-libjson_c       enable libjson-c [no]
@@ -1727,7 +1725,6 @@ EXTERNAL_LIBRARY_LIST="
     libgsm
     libiec61883
     libilbc
-    libinference_engine
     libinference_engine_c_api
     libjack
     libjson_c
@@ -2554,7 +2551,7 @@ cbs_mpeg2_select="cbs"
 cbs_vp9_select="cbs"
 dct_select="rdft"
 dirac_parse_select="golomb"
-dnn_suggest="libtensorflow libinference_engine"
+dnn_suggest="libtensorflow"
 image_inference_suggest="libinference_engine_c_api"
 image_inference_deps="libjson_c"
 error_resilience_select="me_cmp"
@@ -3418,10 +3415,6 @@ fspp_filter_deps="gpl"
 geq_filter_deps="gpl"
 histeq_filter_deps="gpl"
 hqdn3d_filter_deps="gpl"
-inference_classify_filter_deps="libinference_engine libjson_c"
-inference_classify_filter_select="dnn"
-inference_detect_filter_deps="libinference_engine libjson_c"
-inference_detect_filter_select="dnn"
 inference_identify_filter_deps="libjson_c"
 inference_identify_filter_select="dnn"
 inference_metaconvert_filter_deps="libjson_c"
@@ -6263,9 +6256,6 @@ enabled rkmpp             && { require_pkg_config rkmpp rockchip_mpp  rockchip/r
                                  die "ERROR: rkmpp requires --enable-libdrm"; }
                              }
 enabled vapoursynth       && require_pkg_config vapoursynth "vapoursynth-script >= 42" VSScript.h vsscript_init
-
-enabled libinference_engine &&
-    require_pkg_config libinference_engine dldt "ie_api_wrapper.h" IESizeOfContext
 
 enabled librdkafka  && require_pkg_config librdkafka rdkafka "librdkafka/rdkafka.h" rd_kafka_version
 

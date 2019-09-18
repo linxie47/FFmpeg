@@ -7,6 +7,7 @@
 #include "metaconverter.h"
 #include "libavutil/avassert.h"
 #include "ff_base_inference.h"
+#include "logger.h"
 
 int convert_roi_detection(json_object *info_object, AVFrame *frame) {
     AVFrameSideData *sd;
@@ -139,7 +140,7 @@ int tensors_to_file(AVFilterContext *ctx, AVFrame *frame, json_object *info_obje
                     s->method, frame_num, index);
             f = fopen(filename, "wb");
             if (!f) {
-                av_log(ctx, AV_LOG_WARNING, "Failed to open/create file: %s\n", filename);
+                VAII_LOGW("Failed to open/create file: %s\n", filename);
             } else {
                 fwrite(c->tensor_buf->data, sizeof(float), c->tensor_buf->size / sizeof(float), f);
                 fclose(f);

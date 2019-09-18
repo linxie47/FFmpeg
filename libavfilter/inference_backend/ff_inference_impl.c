@@ -125,14 +125,14 @@ static inline int avFormatToFourCC(int format) {
         return FOURCC_RGBP;
     }
 
-    av_log(NULL, AV_LOG_ERROR, "Unsupported AV Format: %d.", format);
+    VAII_LOGE("Unsupported AV Format: %d.", format);
     return 0;
 }
 
 static void ff_buffer_map(AVFrame *frame, Image *image, MemoryType memoryType) {
     const int n_planes = 4;
     if (n_planes > MAX_PLANES_NUMBER) {
-        av_log(NULL, AV_LOG_ERROR, "Planes number %d isn't supported.", n_planes);
+        VAII_LOGE("Planes number %d isn't supported.", n_planes);
         av_assert0(0);
     }
 
@@ -247,8 +247,8 @@ static Model *CreateModel(FFBaseInference *base, const char *model_file, const c
     const OutputBlobMethod *method = output_blob_method_get_by_name("openvino");
     ImageInferenceContext *context = NULL;
 
-    av_log(NULL, AV_LOG_INFO, "Loading model: device=%s, path=%s\n", base->param.device, model_file);
-    av_log(NULL, AV_LOG_INFO, "Setting batch_size=%d, nireq=%d\n", base->param.batch_size, base->param.nireq);
+    VAII_LOGI("Loading model: device=%s, path=%s\n", base->param.device, model_file);
+    VAII_LOGI("Setting batch_size=%d, nireq=%d\n", base->param.batch_size, base->param.nireq);
 
     context = image_inference_alloc(inference, method, "ffmpeg-image-infer");
     model = (Model *)av_mallocz(sizeof(*model));
@@ -257,19 +257,18 @@ static Model *CreateModel(FFBaseInference *base, const char *model_file, const c
     if (model_proc_path) {
         void *proc = model_proc_read_config_file(model_proc_path);
         if (!proc) {
-            av_log(NULL, AV_LOG_ERROR,
-                   "Could not read proc config file:"
+            VAII_LOGE("Could not read proc config file:"
                    "%s\n",
                    model_proc_path);
             av_assert0(proc);
         }
 
         if (model_proc_parse_input_preproc(proc, &model->model_preproc) < 0) {
-            av_log(NULL, AV_LOG_ERROR, "Parse input preproc error.\n");
+            VAII_ERROR("Parse input preproc error.\n");
         }
 
         if (model_proc_parse_output_postproc(proc, &model->model_postproc) < 0) {
-            av_log(NULL, AV_LOG_ERROR, "Parse output postproc error.\n");
+            VAII_ERROR("Parse output postproc error.\n");
         }
 
         model->proc_config = proc;
@@ -529,7 +528,7 @@ int FFInferenceImplGetFrame(void *ctx, FFInferenceImpl *impl, AVFrame **frame) {
 size_t FFInferenceImplGetQueueSize(void *ctx, FFInferenceImpl *impl) {
     ff_list_t *out = impl->output_frames;
     ff_list_t *pro = impl->processed_frames;
-    av_log(ctx, AV_LOG_INFO, "output:%zu processed:%zu\n", out->size(out), pro->size(pro));
+    VAII_LOGI("output:%zu processed:%zu\n", out->size(out), pro->size(pro));
     return out->size(out) + pro->size(pro);
 }
 

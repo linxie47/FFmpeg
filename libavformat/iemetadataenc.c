@@ -23,7 +23,7 @@
 #include "internal.h"
 #include "libavutil/dict.h"
 #include "libavfilter/avfilter.h"
-#include "libavfilter/inference.h"
+#include "libavfilter/inference_backend/ff_base_inference.h"
 #include "libavutil/opt.h"
 #include <float.h>
 

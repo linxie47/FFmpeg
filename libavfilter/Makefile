@@ -27,7 +27,6 @@ OBJS-$(HAVE_THREADS)                         += pthread.o
 # subsystems
 OBJS-$(CONFIG_QSVVPP)                        += qsvvpp.o
 DNN-OBJS-$(CONFIG_LIBTENSORFLOW)             += dnn_backend_tf.o
-DNN-OBJS-$(CONFIG_LIBINFERENCE_ENGINE)       += dnn_backend_intel_ie.o inference.o
 OBJS-$(CONFIG_DNN)                           += dnn_interface.o dnn_backend_native.o $(DNN-OBJS-yes)
 OBJS-$(CONFIG_IMAGE_INFERENCE)               += inference_backend/ff_base_inference.o             \
                                                 inference_backend/ff_inference_impl.o             \
@@ -274,8 +273,6 @@ OBJS-$(CONFIG_HWUPLOAD_FILTER)               += vf_hwupload.o
 OBJS-$(CONFIG_HYSTERESIS_FILTER)             += vf_hysteresis.o framesync.o
 OBJS-$(CONFIG_IDET_FILTER)                   += vf_idet.o
 OBJS-$(CONFIG_IL_FILTER)                     += vf_il.o
-OBJS-$(CONFIG_INFERENCE_CLASSIFY_FILTER)     += vf_inference_classify.o
-OBJS-$(CONFIG_INFERENCE_DETECT_FILTER)       += vf_inference_detect.o
 OBJS-$(CONFIG_INFERENCE_IDENTIFY_FILTER)     += vf_inference_identify.o
 OBJS-$(CONFIG_INFERENCE_METACONVERT_FILTER)  += vf_inference_metaconvert.o
 OBJS-$(CONFIG_IE_CLASSIFY_FILTER)            += vf_ie_classify.o
