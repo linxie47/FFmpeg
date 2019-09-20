@@ -4316,7 +4316,7 @@ static int process_input(int file_index)
             int empty = av_buffer_pool_is_empty(frames_ctx->pool);
 
             if (empty) {
-                av_log(NULL, AV_LOG_WARNING, "Buffer pool is empty.\n");
+                av_log(NULL, AV_LOG_VERBOSE, "Buffer pool is empty.\n");
                 for (j = 0; j < nb_filtergraphs; j++) {
                     FilterGraph *fg = filtergraphs[j];
                     avfilter_graph_set_parsed(fg->graph);
