@@ -123,11 +123,11 @@ ie_resize_nv12="PRE_PROCESSOR_TYPE=ie|IMAGE_FORMAT=NV12"
 
 if [ ! -z "$show" ]; then
     $BASEDIR/ffplay $debug_log -i $stream -sync video -vf \
-        "format=nv12,ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=$batch:configs=$ie_resize_nv12, \
+        "format=nv12,detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=$batch:configs=$ie_resize_nv12, \
         ocv_overlay"
 else
     $BASEDIR/ffmpeg $debug_log -i $stream -vf \
-    "format=bgr24,ie_detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL):device=${D_ID1}:nireq=$req_num:batch_size=$batch:configs=$ie_resize_bgr" \
+    "format=bgr24,detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL):device=${D_ID1}:nireq=$req_num:batch_size=$batch:configs=$ie_resize_bgr" \
         -y -f iemetadata /tmp/obj_detect.json
 fi
 

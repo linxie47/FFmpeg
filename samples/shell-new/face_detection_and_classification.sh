@@ -134,13 +134,13 @@ batch=${batch:-1}
 
 if [ ! -z "$show" ]; then
     #gdb --args \
-    $BASEDIR/ffplay $debug_log -i $stream -sync video -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
+    $BASEDIR/ffplay $debug_log -i $stream -sync video -vf "detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
         ocv_overlay"
 else
     #gdb --args \
     $BASEDIR/ffmpeg_g $debug_log $hw_accel \
-        -i $stream -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
-        ie_classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2:nireq=$req_num2:batch_size=$batch, \
-        ie_classify=model=$CLASS_MODEL_PATH1:model_proc=$(PROC_PATH $MODEL3):device=$D_ID3:nireq=$req_num3:batch_size=$batch" \
+        -i $stream -vf "detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
+        classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2:nireq=$req_num2:batch_size=$batch, \
+        classify=model=$CLASS_MODEL_PATH1:model_proc=$(PROC_PATH $MODEL3):device=$D_ID3:nireq=$req_num3:batch_size=$batch" \
         -f iemetadata -y /tmp/face-and-classify.json
 fi

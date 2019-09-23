@@ -32,7 +32,7 @@ echo Running sample with the following parameters:
 echo LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
 
 ffmpeg $HW_ACCEL -i ${FILE} -vf " \
-  ie_detect=model=$DETECT_MODEL_PATH:device=$DEVICE:nireq=24, \
-  ie_classify=model=$IDENTIFICATION_MODEL_PATH:model_proc=$IDENTIFICATION_MODEL_PROC_PATH:device=$DEVICE:nireq=24, \
+  detect=model=$DETECT_MODEL_PATH:device=$DEVICE:nireq=24, \
+  classify=model=$IDENTIFICATION_MODEL_PATH:model_proc=$IDENTIFICATION_MODEL_PROC_PATH:device=$DEVICE:nireq=24, \
   identify=gallery=$GALLERY" \
   -an -f null -

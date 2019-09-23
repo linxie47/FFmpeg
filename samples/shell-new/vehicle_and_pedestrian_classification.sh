@@ -133,16 +133,16 @@ batch=${batch:-1}
 
 if [ ! -z "$show" ]; then
     $BASEDIR/ffplay $debug_log -i $stream -sync video -vf \
-        "ie_detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL1):device=$D_ID1, \
-        ie_classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2, \
-        ie_classify=model=$CLASS_MODEL_PATH1:model_proc=$(PROC_PATH $MODEL3):device=$D_ID3, \
+        "detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL1):device=$D_ID1, \
+        classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2, \
+        classify=model=$CLASS_MODEL_PATH1:model_proc=$(PROC_PATH $MODEL3):device=$D_ID3, \
         ocv_overlay"
 else
     $BASEDIR/ffmpeg $debug_log $hw_accel \
         -i $stream -vf \
-        "ie_detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL1):device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
-        ie_classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2:nireq=$req_num2:batch_size=$batch, \
-        ie_classify=model=$CLASS_MODEL_PATH1:model_proc=$(PROC_PATH $MODEL3):device=$D_ID3:nireq=$req_num3:batch_size=$batch" \
+        "detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL1):device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
+        classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2:nireq=$req_num2:batch_size=$batch, \
+        classify=model=$CLASS_MODEL_PATH1:model_proc=$(PROC_PATH $MODEL3):device=$D_ID3:nireq=$req_num3:batch_size=$batch" \
         -an -f null - #-f iemetadata -y /tmp/vehicle.json
 fi
 

@@ -33,6 +33,6 @@ echo Running sample with the following parameters:
 echo LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
 
 ffmpeg -i ${FILE} -vf " \
-  ie_detect=model=$DETECTION_MODEL_PATH:model_proc=$DETECTION_MODEL_PROC_PATH:device=$DEVICE:nireq=16:configs=$CONFIGS, \
-  ie_classify=model=$CLASSIFY_MODEL_PATH:model_proc=$CLASSIFY_MODEL_PROC_PATH:device=$DEVICE:nireq=14" \
+  detect=model=$DETECTION_MODEL_PATH:model_proc=$DETECTION_MODEL_PROC_PATH:device=$DEVICE:nireq=16:configs=$CONFIGS, \
+  classify=model=$CLASSIFY_MODEL_PATH:model_proc=$CLASSIFY_MODEL_PROC_PATH:device=$DEVICE:nireq=14" \
   -an -f null -

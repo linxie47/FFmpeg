@@ -120,14 +120,14 @@ batch=${batch:-1}
 
 if [ ! -z "$show" ]; then
     $BASEDIR/ffplay $debug_log -i $stream -sync video -vf \
-        "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=0|0|320|320, \
+        "detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=0|0|320|320, \
         ocv_overlay"
 else
     #gdb --args \
     $BASEDIR/ffmpeg_g $debug_log $hw_accel -i $stream \
-    -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=0|0|320|320" -f null - \
-    -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=319|0|320|320" -f null -  \
-    -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=100|319|320|320" -f null - \
-    -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=0|100|320|320" -f null -
+    -vf "detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=0|0|320|320" -f null - \
+    -vf "detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=319|0|320|320" -f null -  \
+    -vf "detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=100|319|320|320" -f null - \
+    -vf "detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=1:crop_params=0|100|320|320" -f null -
 fi
 

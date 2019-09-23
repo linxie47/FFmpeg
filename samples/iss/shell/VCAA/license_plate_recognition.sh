@@ -34,6 +34,6 @@ echo Running sample with the following parameters:
 echo LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
 
 ffmpeg $HW_ACCEL -i ${FILE} -vf " \
-  ie_detect=model=$DETECTION_MODEL_PATH:model_proc=$DETECTION_MODEL_PROC_PATH:device=$DEVICE:nireq=24, \
-  ie_classify=model=$CLASSIFY_MODEL_PATH:model_proc=$CLASSIFY_MODEL_PROC_PATH:device=$DEVICE:nireq=24" \
+  detect=model=$DETECTION_MODEL_PATH:model_proc=$DETECTION_MODEL_PROC_PATH:device=$DEVICE:nireq=24, \
+  classify=model=$CLASSIFY_MODEL_PATH:model_proc=$CLASSIFY_MODEL_PROC_PATH:device=$DEVICE:nireq=24" \
   -an -f null -

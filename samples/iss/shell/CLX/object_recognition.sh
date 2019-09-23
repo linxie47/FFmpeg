@@ -27,5 +27,5 @@ echo Running sample with the following parameters:
 echo LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
 
 ffmpeg -i ${FILE} -vf " \
-  ie_detect=model=$DETECTION_MODEL_PATH:model_proc=$DETECTION_MODEL_PROC_PATH:device=$DEVICE:nireq=18:configs=$CONFIGS" \
+  detect=model=$DETECTION_MODEL_PATH:model_proc=$DETECTION_MODEL_PROC_PATH:device=$DEVICE:nireq=18:configs=$CONFIGS" \
   -an -f null -

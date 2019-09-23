@@ -38,8 +38,8 @@ echo LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
 while [[ $idx -lt $NUM ]]
 do
 ffmpeg -i ${FILE} -vf " \
-  ie_detect=model=$DETECTION_MODEL_PATH:model_proc=$DETECTION_MODEL_PROC_PATH:device=$DEVICE:nireq=16:configs=$CONFIGS:async_preproc=1, \
-  ie_classify=model=$CLASSIFY_MODEL_PATH:model_proc=$CLASSIFY_MODEL_PROC_PATH:device=$DEVICE:nireq=8:configs=$CONFIGS:async_preproc=1" \
+  detect=model=$DETECTION_MODEL_PATH:model_proc=$DETECTION_MODEL_PROC_PATH:device=$DEVICE:nireq=16:configs=$CONFIGS:async_preproc=1, \
+  classify=model=$CLASSIFY_MODEL_PATH:model_proc=$CLASSIFY_MODEL_PROC_PATH:device=$DEVICE:nireq=8:configs=$CONFIGS:async_preproc=1" \
   -an -f null - &
 idx=`expr $idx + 1`
 

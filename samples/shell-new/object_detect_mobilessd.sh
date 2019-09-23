@@ -140,12 +140,12 @@ GET_DEV_CONFIG() {
 
 if [ ! -z "$show" ]; then
     $BASEDIR/ffplay $debug_log -i $stream -sync video -vf \
-        "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=$batch, \
+        "detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num:batch_size=$batch, \
         ocv_overlay"
 else
     #gdb --args \
     $BASEDIR/ffmpeg $debug_log $hw_accel -i $stream -vf \
-    "ie_detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL):device=${D_ID1}:nireq=$req_num:batch_size=$batch:configs=$(GET_DEV_CONFIG $DEVICE1)" \
+    "detect=model=$DETECT_MODEL_PATH:model_proc=$(PROC_PATH $MODEL):device=${D_ID1}:nireq=$req_num:batch_size=$batch:configs=$(GET_DEV_CONFIG $DEVICE1)" \
         -y -f iemetadata /tmp/obj_detect.json
 fi
 

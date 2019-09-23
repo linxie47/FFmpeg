@@ -125,19 +125,19 @@ req_num1=${req_num:-4}
 req_num2=${req_num:-4}
 batch=${batch:-1}
 
-GALLERY=${BASEDIR}/samples/shell/reidentification/gallery/gallery.json
+GALLERY=${BASEDIR}/samples/shell-new/reidentification/gallery/gallery.json
 
 if [ ! -z "$show" ]; then
     $BASEDIR/ffplay $debug_log -i $stream -sync video -vf \
-        "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
-        ie_classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2, \
+        "detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
+        classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2, \
         identify=gallery=$GALLERY, \
         ocv_overlay"
 else
     #gdb --args \
     $BASEDIR/ffmpeg_g $debug_log $hw_accel \
-        -i $stream -vf "ie_detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
-        ie_classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2:nireq=$req_num2:batch_size=$batch, \
+        -i $stream -vf "detect=model=$DETECT_MODEL_PATH:device=$D_ID1:nireq=$req_num1:batch_size=$batch, \
+        classify=model=$CLASS_MODEL_PATH:model_proc=$(PROC_PATH $MODEL2):device=$D_ID2:nireq=$req_num2:batch_size=$batch, \
         identify=gallery=$GALLERY" \
         -an -f iemetadata -y /tmp/face-identify.json
 fi
