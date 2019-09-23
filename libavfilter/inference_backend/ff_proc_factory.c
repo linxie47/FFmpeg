@@ -639,12 +639,12 @@ PostProcFunction getPostProcFunctionByName(const char *name, const char *model) 
     if (name == NULL || model == NULL)
         return NULL;
 
-    if (!strcmp(name, "ie_detect")) {
+    if (!strcmp(name, "detect")) {
         if (strstr(model, "yolo"))
             return (PostProcFunction)ExtractYOLOV3BoundingBoxes;
         else
             return (PostProcFunction)ExtractBoundingBoxes;
-    } else if (!strcmp(name, "ie_classify")) {
+    } else if (!strcmp(name, "classify")) {
         return (PostProcFunction)Blob2RoiMeta;
     }
     return NULL;

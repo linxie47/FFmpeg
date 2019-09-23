@@ -298,7 +298,7 @@ static int activate(AVFilterContext *ctx)
     return FFERROR_NOT_READY;
 }
 
-static const AVOption ie_detect_options[] = {
+static const AVOption inference_detect_options[] = {
     { "dnn_backend",  "DNN backend for model execution", OFFSET(backend_type),    AV_OPT_TYPE_FLAGS,  { .i64 = 1},          0, 2,  FLAGS },
     { "model",        "path to model file for network",  OFFSET(model),           AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
     { "model_proc",   "model preproc and postproc",      OFFSET(model_proc),      AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
@@ -315,7 +315,7 @@ static const AVOption ie_detect_options[] = {
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(ie_detect);
+AVFILTER_DEFINE_CLASS(inference_detect);
 
 static const AVFilterPad detect_inputs[] = {
     {
@@ -334,8 +334,8 @@ static const AVFilterPad detect_outputs[] = {
     { NULL }
 };
 
-AVFilter ff_vf_ie_detect = {
-    .name          = "ie_detect",
+AVFilter ff_vf_inference_detect = {
+    .name          = "detect",
     .description   = NULL_IF_CONFIG_SMALL("Image Inference Detect Filter."),
     .priv_size     = sizeof(IEDetectContext),
     .query_formats = query_formats,
@@ -344,6 +344,6 @@ AVFilter ff_vf_ie_detect = {
     .uninit        = detect_uninit,
     .inputs        = detect_inputs,
     .outputs       = detect_outputs,
-    .priv_class    = &ie_detect_class,
+    .priv_class    = &inference_detect_class,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 };

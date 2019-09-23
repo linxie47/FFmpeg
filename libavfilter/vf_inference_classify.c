@@ -314,7 +314,7 @@ static int activate(AVFilterContext *ctx)
     return FFERROR_NOT_READY;
 }
 
-static const AVOption ie_classify_options[] = {
+static const AVOption inference_classify_options[] = {
     { "dnn_backend",  "DNN backend for model execution", OFFSET(backend_type),    AV_OPT_TYPE_FLAGS,  { .i64 = 1},          0, 2,  FLAGS },
     { "model",        "path to model file for network",  OFFSET(model),           AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
     { "model_proc",   "model preproc and postproc",      OFFSET(model_proc),      AV_OPT_TYPE_STRING, { .str = NULL},       0, 0,  FLAGS },
@@ -329,7 +329,7 @@ static const AVOption ie_classify_options[] = {
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(ie_classify);
+AVFILTER_DEFINE_CLASS(inference_classify);
 
 static const AVFilterPad classify_inputs[] = {
     {
@@ -348,8 +348,8 @@ static const AVFilterPad classify_outputs[] = {
     { NULL }
 };
 
-AVFilter ff_vf_ie_classify = {
-    .name          = "ie_classify",
+AVFilter ff_vf_inference_classify = {
+    .name          = "classify",
     .description   = NULL_IF_CONFIG_SMALL("Image Inference classify filter."),
     .priv_size     = sizeof(IEClassifyContext),
     .query_formats = query_formats,
@@ -358,6 +358,6 @@ AVFilter ff_vf_ie_classify = {
     .uninit        = classify_uninit,
     .inputs        = classify_inputs,
     .outputs       = classify_outputs,
-    .priv_class    = &ie_classify_class,
+    .priv_class    = &inference_classify_class,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 };
