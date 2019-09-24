@@ -34,23 +34,34 @@ int convert_roi_detection(json_object *info_object, AVFrame *frame) {
     d_meta = (InferDetectionMeta *)sd->data;
 
     if (d_meta) {
+        json_object *resolution_object, *objects;
+
         boxes = d_meta->bboxes;
         if (boxes == NULL)
             return 0;
 
-        json_object *resolution_object = json_object_new_object();
-        json_object *objects = json_object_new_array();
+        resolution_object = json_object_new_object();
+        objects = json_object_new_array();
 
         json_object_object_add(resolution_object, "width", json_object_new_int(frame->width));
         json_object_object_add(resolution_object, "height", json_object_new_int(frame->height));
         json_object_object_add(info_object, "resolution", resolution_object);
 
         for (size_t i = 0; i < boxes->num; i++) {
-            LabelsArray *array = (LabelsArray *)boxes->bbox[i]->label_buf->data;
-            int label_id = boxes->bbox[i]->label_id;
-            json_object *box_object = json_object_new_object();
-            json_object *bounding_box = json_object_new_object();
-            json_object *detection_object = json_object_new_object();
+            LabelsArray *array;
+            int label_id;
+            json_object *box_object, *bounding_box, *detection_object;
+
+            if (!boxes->bbox[i]->label_buf) {
+                VAII_ERROR("No model proc for this model\n");
+                break;
+            }
+
+            array = (LabelsArray *)boxes->bbox[i]->label_buf->data;
+            label_id = boxes->bbox[i]->label_id;
+            box_object = json_object_new_object();
+            bounding_box = json_object_new_object();
+            detection_object = json_object_new_object();
 
             json_object_object_add(box_object, "x_min", json_object_new_int(boxes->bbox[i]->x_min));
             json_object_object_add(box_object, "y_min", json_object_new_int(boxes->bbox[i]->y_min));
@@ -90,8 +101,15 @@ int convert_roi_tensor(json_object *info_object, AVFrame *frame) {
 
         for (i = 0; i < meta_num; i++) {
             InferClassification *c = c_meta->c_array->classifications[i];
-            json_object *classify_object = json_object_new_object();
-            json_object *item_object = json_object_new_object();
+            json_object *classify_object, *item_object;
+
+            if (!strcmp(c->name, "default")) {
+                VAII_ERROR("No model proc for this model\n");
+                break;
+            }
+
+            classify_object = json_object_new_object();
+            item_object = json_object_new_object();
 
             json_object_object_add(item_object, "detect_id", json_object_new_int(c->detect_id));
 
