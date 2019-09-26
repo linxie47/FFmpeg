@@ -4852,7 +4852,7 @@ static int transcode(void)
                 if (ft->sum_working_time > 1) {
                     double fps = (double)(frame_cnt * 1000000) / ft->sum_working_time;
                     if (fps < 10000) { //some filter delivered too big fps is not we focused
-                        printf("| filter profiling | name=%s, init=%.2f ms, frame=%d, fps=%.2f\n",
+                        printf("| filter profiling | name=%s, init=%.2f ms, frame=%ld, fps=%.2f\n",
                                 ft->filter->name, (double)ft->init_working_time / 1000, frame_cnt, fps);
                     }
                 }

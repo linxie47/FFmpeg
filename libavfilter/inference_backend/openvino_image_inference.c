@@ -277,6 +277,8 @@ static int OpenVINOImageInferenceCreate(ImageInferenceContext *ctx, MemoryType t
         VAII_ERROR("Alloc in/outputs ptr failed!");
         goto err;
     }
+    memset(vino->inputs,  0, vino->num_inputs *  sizeof(*vino->inputs));
+    memset(vino->outputs, 0, vino->num_outputs * sizeof(*vino->outputs));
 
     for (size_t i = 0; i < vino->num_inputs; i++) {
         vino->inputs[i] = (ie_input_info_t *)malloc(sizeof(*vino->inputs[i]));
@@ -542,6 +544,7 @@ static void *WorkingFunction(void *arg) {
     for (;;) {
         IEStatusCode sts;
         BatchRequest *request = (BatchRequest *)SafeQueueFront(vino->workingRequests);
+        assert(request);
         VAII_DEBUG("loop");
         if (!request->buffers.num_buffers) {
             break;

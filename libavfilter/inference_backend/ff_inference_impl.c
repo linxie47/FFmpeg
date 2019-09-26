@@ -145,10 +145,6 @@ static inline int avFormatToFourCC(int format) {
 
 static void ff_buffer_map(AVFrame *frame, Image *image, MemoryType memoryType) {
     const int n_planes = 4;
-    if (n_planes > MAX_PLANES_NUMBER) {
-        VAII_LOGE("Planes number %d isn't supported.", n_planes);
-        av_assert0(0);
-    }
 
     image->type = memoryType;
     image->format = avFormatToFourCC(frame->format);
@@ -471,6 +467,8 @@ int FFInferenceImplAddFrame(void *ctx, FFInferenceImpl *impl, AVFrame *frame) {
                     if (!CheckObjectClass(model_preproc->object_class, bboxes->bbox[i]))
                         continue;
                     roi_meta = (FFVideoRegionOfInterestMeta *)av_malloc(sizeof(*roi_meta));
+                    if (roi_meta == NULL)
+                        goto exit;
                     roi_meta->x = bboxes->bbox[i]->x_min;
                     roi_meta->y = bboxes->bbox[i]->y_min;
                     roi_meta->w = bboxes->bbox[i]->x_max - bboxes->bbox[i]->x_min;
@@ -500,6 +498,10 @@ int FFInferenceImplAddFrame(void *ctx, FFInferenceImpl *impl, AVFrame *frame) {
         }
 
         output_frame = (OutputFrame *)av_malloc(sizeof(*output_frame));
+        if (output_frame == NULL) {
+            pthread_mutex_unlock(&impl->output_frames_mutex);
+            goto exit;
+        }
         output_frame->frame = frame;
         output_frame->writable_frame = NULL; // TODO: alloc new frame if not writable
         output_frame->inference_count = inference_count;

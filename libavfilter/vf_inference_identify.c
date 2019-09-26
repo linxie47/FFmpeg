@@ -185,12 +185,15 @@ static av_cold int identify_init(AVFilterContext *ctx) {
                 pair->feature = av_malloc(vec_size_in_bytes);
                 if (!pair->feature){
                     fclose(vec_fp);
+                    av_free(pair);
                     return AVERROR(ENOMEM);
                 }
 
                 if (fread(pair->feature, vec_size_in_bytes, 1, vec_fp) != 1) {
                     av_log(ctx, AV_LOG_ERROR, "Feature vector size mismatch:%s\n", path);
                     fclose(vec_fp);
+                    av_free(pair->feature);
+                    av_free(pair);
                     return AVERROR(EINVAL);
                 }
 

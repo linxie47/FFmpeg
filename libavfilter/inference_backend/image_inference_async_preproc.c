@@ -212,6 +212,8 @@ static void *AsyncPreprocWorkingFunction(void *arg) {
 
     while (1) {
         PreprocImage *pp_image = (PreprocImage *)SafeQueueFront(async_preproc->workingImages);
+        assert(pp_image);
+
         // empty ctx means ending
         if (!pp_image->img_map_ctx)
             break;

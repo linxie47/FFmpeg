@@ -32,12 +32,12 @@ int convert_roi_detection(json_object *info_object, AVFrame *frame) {
         return 0;
 
     d_meta = (InferDetectionMeta *)sd->data;
-    boxes = d_meta->bboxes;
-
-    if (boxes == NULL)
-        return 0;
 
     if (d_meta) {
+        boxes = d_meta->bboxes;
+        if (boxes == NULL)
+            return 0;
+
         json_object *resolution_object = json_object_new_object();
         json_object *objects = json_object_new_array();
 

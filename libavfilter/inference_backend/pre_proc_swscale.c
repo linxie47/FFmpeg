@@ -122,7 +122,7 @@ static void FFPreProcConvert(PreProcContext *context, const Image *src, Image *d
     struct SwsContext **sws_context = ff_pre_proc->sws_context;
     Image *image_yuv = &ff_pre_proc->image_yuv;
     Image *image_bgr = &ff_pre_proc->image_bgr;
-    uint8_t *gbr_planes[3] = {};
+    uint8_t *gbr_planes[4] = {};
 
     // if identical format and resolution
     if (src->format == dst->format && src->format == FOURCC_RGBP && src->width == dst->width &&

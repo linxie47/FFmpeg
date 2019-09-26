@@ -279,7 +279,7 @@ int avfilter_config_links(AVFilterContext *filter)
 {
     int (*config_link)(AVFilterLink *);
     unsigned i;
-    int64_t tm_init;
+    int64_t tm_init = 0;
     int ret;
 
     if (av_profiling_get())
@@ -768,7 +768,6 @@ static void free_link(AVFilterLink *link)
 void avfilter_free(AVFilterContext *filter)
 {
     int i;
-    int64_t frame_cnt = 0;
 
     if (!filter)
         return;

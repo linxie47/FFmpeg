@@ -80,6 +80,9 @@ static int config_input(AVFilterLink *inlink)
     AVFilterContext *ctx = inlink->dst;
     IEClassifyContext *s = ctx->priv;
     const AVPixFmtDescriptor *desc   = av_pix_fmt_desc_get(inlink->format);
+    if (desc == NULL)
+        return AVERROR(EINVAL);
+
     FFInferenceParam param = { };
 
     av_assert0(s->model);

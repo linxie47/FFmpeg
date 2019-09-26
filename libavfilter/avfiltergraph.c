@@ -1456,7 +1456,7 @@ int avfilter_graph_request_oldest(AVFilterGraph *graph)
 int avfilter_chain_occupation(AVFilterContext *avctx)
 {
     AVFilterLink *link = NULL;
-    int i, frm_num = 0;
+    int frm_num = 0;
 
     if (!avctx)
         return 0;

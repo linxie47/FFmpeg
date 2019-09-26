@@ -512,6 +512,8 @@ static int attributes_to_text(FFVideoRegionOfInterestMeta *meta, OutputPostproc 
         float confidence = 0;
         LabelsArray *array;
         classification->attributes = av_mallocz(4096*sizeof(char));
+        if (classification->attributes == NULL)
+            return -1;
 
         if (post_proc->threshold != 0)
             threshold = post_proc->threshold;
@@ -532,6 +534,8 @@ static int attributes_to_text(FFVideoRegionOfInterestMeta *meta, OutputPostproc 
         int i;
         LabelsArray *array;
         classification->attributes = av_mallocz(4096*sizeof(char));
+        if (classification->attributes == NULL)
+            return -1;
 
         array = (LabelsArray *)post_proc->labels->data;
         for (i = 0; i < array->num; i++) {
@@ -633,6 +637,7 @@ static void Blob2RoiMeta(const OutputBlobArray *blob_array, InferenceROIArray *i
                                    classify_meta);
                 } else {
                     VAII_LOGE("Undefined converter:%s\n", post_proc->converter);
+                    av_free(classification);
                     break;
                 }
             } else {

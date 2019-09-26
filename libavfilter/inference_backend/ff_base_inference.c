@@ -38,6 +38,8 @@ static void ff_trace_function(int level, const char *fmt, va_list vl) {
 
 FFBaseInference *av_base_inference_create(const char *inference_id) {
     FFBaseInference *base_inference = (FFBaseInference *)av_mallocz(sizeof(*base_inference));
+    if (base_inference == NULL)
+        return NULL;
 
     set_log_function(ff_log_function);
     set_trace_function(ff_trace_function);
