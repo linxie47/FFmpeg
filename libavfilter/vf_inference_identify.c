@@ -113,7 +113,7 @@ static int query_formats(AVFilterContext *context) {
 static av_cold int identify_init(AVFilterContext *ctx) {
     size_t i, index = 1;
     char *dup, *unknown;
-    const char *dirname;
+    const char *dirname, *suffix;
     json_object *entry;
     LabelsArray *larray = NULL;
     AVBufferRef *ref    = NULL;
@@ -123,7 +123,13 @@ static av_cold int identify_init(AVFilterContext *ctx) {
 
     av_assert0(s->gallery);
 
-    if (strcmp(get_filename_ext(s->gallery), gallery_file_suffix)) {
+    suffix = get_filename_ext(s->gallery);
+    if (!suffix) {
+        av_log(ctx, AV_LOG_ERROR, "Unrecognized gallery file '%s' \n", s->gallery);
+        return AVERROR(EINVAL);
+    }
+
+    if (0 != strcmp(suffix, gallery_file_suffix)) {
         av_log(ctx, AV_LOG_ERROR, "Face gallery '%s' is not a json file\n", s->gallery);
         return AVERROR(EINVAL);
     }
@@ -166,6 +172,8 @@ static av_cold int identify_init(AVFilterContext *ctx) {
                 if (json_object_get_string(feature) == NULL)
                     continue;
 
+                assert((strlen(dirname) + strlen(json_object_get_string(feature)) + 1) < 4096);
+
                 strncpy(path, dirname, strlen(dirname));
                 strncat(path, "/", 1);
                 strncat(path, json_object_get_string(feature), strlen(json_object_get_string(feature)));
@@ -179,14 +187,14 @@ static av_cold int identify_init(AVFilterContext *ctx) {
                 pair = av_mallocz(sizeof(FeatureLabelPair));
                 if (!pair){
                     fclose(vec_fp);
-                    return AVERROR(ENOMEM);
+                    goto error;
                 }
 
                 pair->feature = av_malloc(vec_size_in_bytes);
                 if (!pair->feature){
                     fclose(vec_fp);
                     av_free(pair);
-                    return AVERROR(ENOMEM);
+                    goto error;
                 }
 
                 if (fread(pair->feature, vec_size_in_bytes, 1, vec_fp) != 1) {
@@ -194,7 +202,7 @@ static av_cold int identify_init(AVFilterContext *ctx) {
                     fclose(vec_fp);
                     av_free(pair->feature);
                     av_free(pair);
-                    return AVERROR(EINVAL);
+                    goto error;
                 }
 
                 fclose(vec_fp);
@@ -208,7 +216,7 @@ static av_cold int identify_init(AVFilterContext *ctx) {
 
     s->norm_std = av_mallocz(sizeof(double) * s->features_num);
     if (!s->norm_std)
-        return AVERROR(ENOMEM);
+        goto error;
 
     for (i = 0; i < s->features_num; i++)
         s->norm_std[i] = av_norm(s->features[i]->feature, FACE_FEATURE_VECTOR_LEN);
@@ -221,6 +229,10 @@ static av_cold int identify_init(AVFilterContext *ctx) {
     json_object_put(entry);
 
     return 0;
+error:
+    if (larray)
+        av_free(larray);
+    return AVERROR(ENOMEM);
 }
 
 static av_cold void identify_uninit(AVFilterContext *ctx) {
