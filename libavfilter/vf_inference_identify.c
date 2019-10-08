@@ -166,15 +166,12 @@ static av_cold int identify_init(AVFilterContext *ctx) {
                 FeatureLabelPair *pair;
                 char path[4096];
 
-                memset(path, 0, sizeof(path));
-
                 feature = json_object_array_get_idx(features, i);
                 if (json_object_get_string(feature) == NULL)
                     continue;
 
-                assert((strlen(dirname) + strlen(json_object_get_string(feature)) + 1) < 4096);
-
-                strncpy(path, dirname, strlen(dirname));
+                av_assert0((strlen(dirname) + strlen(json_object_get_string(feature)) + 1) < sizeof(path));
+                strncpy(path, dirname, sizeof(path));
                 strncat(path, "/", 1);
                 strncat(path, json_object_get_string(feature), strlen(json_object_get_string(feature)));
 
