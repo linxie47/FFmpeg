@@ -1691,6 +1691,7 @@ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_ti
                 if (!ft)
                     continue;
                 init_time += ft->init_working_time;
+                av_log(ft, AV_LOG_INFO, "init time:%"PRId64"\n", ft->init_working_time);
             }
         }
     }
