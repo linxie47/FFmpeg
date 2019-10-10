@@ -1781,7 +1781,8 @@ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_ti
         total_frames_num = 0;
         for (i = 0; i < nb_output_streams; i++) {
             ost = output_streams[i];
-            total_frames_num += ost->frames_encoded;
+            if (ost->enc_ctx->codec_type == AVMEDIA_TYPE_VIDEO)
+                total_frames_num += ost->frames_encoded;
         }
         float total_fps;
         total_fps = t > 1 ? total_frames_num / t : 0;
