@@ -1685,8 +1685,9 @@ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_ti
     if (init_time == 0 && do_profiling_all) {
         for (i = 0; i < nb_filtergraphs; i++) {
             FilterGraph *fg = filtergraphs[i];
-            int j;
-            for (j = 0; j < fg->graph->nb_filters; j++) {
+            if (!fg || !fg->graph)
+                continue;
+            for (int j = 0; j < fg->graph->nb_filters; j++) {
                 AVFilterContext *ft = fg->graph->filters[j];
                 if (!ft)
                     continue;
@@ -4837,8 +4838,9 @@ static int transcode(void)
     if (do_profiling_all) { //for filters
         for (i = 0; i < nb_filtergraphs; i++) {
             FilterGraph *fg = filtergraphs[i];
-            int j;
-            for (j = 0; j < fg->graph->nb_filters; j++) {
+            if (!fg || !fg->graph)
+                continue;
+            for (int j = 0; j < fg->graph->nb_filters; j++) {
                 AVFilterContext *ft = fg->graph->filters[j];
                 int64_t frame_cnt = 0;
                 int k;
